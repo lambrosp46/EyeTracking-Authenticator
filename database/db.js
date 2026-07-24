@@ -1,9 +1,11 @@
-import { SQLiteProvider } from 'expo-sqlite';
+import { SQLiteProvider, SQLite } from 'expo-sqlite';
+
+const DATABASE_NAME = 'EyeTracking-Auth.db';
 
 export default function App() {
   return (
     <SQLiteProvider
-      databaseName="EyeTracking-Auth.db"
+      databaseName={DATABASE_NAME}
       onInit={initializeDatabase}
     >
       <MainApp />

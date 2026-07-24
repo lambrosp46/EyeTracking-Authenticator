@@ -33,7 +33,7 @@ export default function RegisterScreen({ navigation }) {
               <Text style={styles.buttonText}>Test</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.button} onPress={() => {dbTest(); setDisplayData(!displayData)}} > 
-              <Text style={styles.buttonText}>Display</Text>
+              <Text style={styles.buttonText}>{displayData ? 'Hide' : 'Display'}</Text>
             </TouchableOpacity>
             {displayData && <DbShow testData={testData} />}
           </View>
