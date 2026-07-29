@@ -30,13 +30,20 @@ export default function RegisterScreen({ navigation }) {
               onChangeText={(text) => setUsername(text)}
             />
             
-            <Text style={styles.registerText}>Ανεβάστε εικόνα για κωδικό</Text>
-            
             <ImageCapture 
               imageUri={imageUri} 
               onImageCapture={setImageUri}
               label="Ανεβάστε εικόνα για κωδικό"
             />
+            <TouchableOpacity
+              style={styles.button}
+              onPress={() => {
+                addTest(username, imageUri);
+                setDisplayData(true);
+              }}
+            >
+              <Text style={styles.buttonText}>Register</Text>
+            </TouchableOpacity>
           </View>
         </ScrollView>
       </SafeAreaView>

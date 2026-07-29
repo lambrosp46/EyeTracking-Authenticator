@@ -1,141 +1,172 @@
-import React from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, Alert } from 'react-native';
+import React, { useState } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  Image,
+  StyleSheet,
+  ActionSheetIOS,
+  Alert,
+  Platform,
+} from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
+import * as DocumentPicker from 'expo-document-picker';
 
-export default function ImageCapture({ imageUri, onImageCapture, label = 'Select Image' }) {
-  const handlePickImage = async () => {
+export default function ImageCapture({ onImageSelected, value, label = 'Select image' }) {
+  const [imageUri, setImageUri] = useState(value ?? null);
+  const [busy, setBusy] = useState(false);
+
+  const handleResult = (uri) => {
+    if (!uri) return;
+    setImageUri(uri);
+    onImageSelected?.(uri);
+  };
+
+  const openCamera = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Camera permission needed', 'Please allow camera access in Settings.');
+      return;
+    }
+    setBusy(true);
     try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'We need permission to access your photos.');
-        return;
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
+      const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ['images'],
+        quality: 0.9,
         allowsEditing: false,
-        quality: 1,
       });
-
       if (!result.canceled) {
-        const selectedImageUri = result.assets[0].uri;
-        const filename = `password_image_${Date.now()}.jpg`;
-        const destinationUri = FileSystem.documentDirectory + filename;
-        
-        const copyResult = await FileSystem.copyAsync({
-          from: selectedImageUri,
-          to: destinationUri,
-        });
-        
-        console.log('Copy result:', copyResult);
-        onImageCapture(destinationUri);
-        console.log('Image saved at:', destinationUri);
+        handleResult(result.assets[0].uri);
       }
-    } catch (error) {
-      console.error('Error picking image:', error);
-      Alert.alert('Error', 'Failed to pick image');
+    } finally {
+      setBusy(false);
     }
   };
 
-  const handleCameraCapture = async () => {
+  const openLibrary = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Photos permission needed', 'Please allow photo library access in Settings.');
+      return;
+    }
+    setBusy(true);
     try {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'We need permission to access your camera.');
-        return;
-      }
-
-      const result = await ImagePicker.launchCameraAsync({
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        quality: 0.9,
         allowsEditing: false,
-        quality: 1,
       });
-
       if (!result.canceled) {
-        const capturedImageUri = result.assets[0].uri;
-        const filename = `password_image_${Date.now()}.jpg`;
-        const destinationUri = FileSystem.documentDirectory + filename;
-        
-        const copyResult = await FileSystem.copyAsync({
-          from: capturedImageUri,
-          to: destinationUri,
-        });
-        
-        console.log('Copy result:', copyResult);
-        onImageCapture(destinationUri);
-        console.log('Image saved at:', destinationUri);
+        handleResult(result.assets[0].uri);
       }
-    } catch (error) {
-      console.error('Error capturing image:', error);
-      Alert.alert('Error', 'Failed to capture image');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openFiles = async () => {
+    setBusy(true);
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: 'image/*',
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+      if (!result.canceled) {
+        handleResult(result.assets[0].uri);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const presentPicker = () => {
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ['Cancel', 'Take Photo', 'Choose from Library', 'Choose File'],
+          cancelButtonIndex: 0,
+        },
+        (buttonIndex) => {
+          if (buttonIndex === 1) openCamera();
+          else if (buttonIndex === 2) openLibrary();
+          else if (buttonIndex === 3) openFiles();
+        }
+      );
+    } else {
+      // Android / web fallback — ActionSheetIOS doesn't exist there.
+      Alert.alert('Select image', undefined, [
+        { text: 'Take Photo', onPress: openCamera },
+        { text: 'Choose from Library', onPress: openLibrary },
+        { text: 'Choose File', onPress: openFiles },
+        { text: 'Cancel', style: 'cancel' },
+      ]);
     }
   };
 
   return (
-    <View>
-      <Text style={styles.label}>{label}</Text>
-      <View style={styles.buttonContainer}>
-        <TouchableOpacity style={styles.button} onPress={handlePickImage}>
-          <Text style={styles.buttonText}>Upload Image</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.button} onPress={handleCameraCapture}>
-          <Text style={styles.buttonText}>Capture Photo</Text>
-        </TouchableOpacity>
-      </View>
+    <View style={styles.container}>
+      {label ? <Text style={styles.label}>{label}</Text> : null}
 
-      {imageUri && (
-        <View style={styles.previewContainer}>
-          <Text style={styles.label}>Selected Image:</Text>
+      <TouchableOpacity
+        style={styles.picker}
+        onPress={presentPicker}
+        disabled={busy}
+        activeOpacity={0.7}
+      >
+        {imageUri ? (
           <Image source={{ uri: imageUri }} style={styles.preview} />
-          <Text style={styles.uriText}>Image URI: {imageUri}</Text>
-        </View>
-      )}
+        ) : (
+          <Text style={styles.placeholderText}>
+            {busy ? 'Loading…' : 'Tap to add image'}
+          </Text>
+        )}
+      </TouchableOpacity>
+
+      {imageUri ? (
+        <TouchableOpacity onPress={presentPicker} disabled={busy}>
+          <Text style={styles.changeText}>Change image</Text>
+        </TouchableOpacity>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  label: {
-    fontSize: 15,
-    color: '#374151',
-    marginBottom: 10,
-  },
-  buttonContainer: {
-    marginTop: 12,
-    gap: 10,
-  },
-  button: {
+  container: {
     width: '100%',
-    height: 52,
-    borderRadius: 14,
-    backgroundColor: '#4f46e5',
+    alignItems: 'center',
+    marginVertical: 12,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+    alignSelf: 'flex-start',
+  },
+  picker: {
+    width: 220,
+    height: 220,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderStyle: 'dashed',
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 10,
-  },
-  buttonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#ffffff',
-  },
-  previewContainer: {
-    marginTop: 20,
-    padding: 12,
-    backgroundColor: '#f3f4f6',
-    borderRadius: 12,
-    alignItems: 'center',
+    overflow: 'hidden',
+    backgroundColor: '#fafafa',
   },
   preview: {
-    width: 200,
-    height: 150,
-    borderRadius: 10,
-    marginTop: 10,
-    marginBottom: 10,
+    width: '100%',
+    height: '100%',
   },
-  uriText: {
-    fontSize: 12,
-    color: '#6b7280',
+  placeholderText: {
+    color: '#888',
+    fontSize: 14,
+  },
+  changeText: {
     marginTop: 8,
-    fontFamily: 'monospace',
+    color: '#007AFF',
+    fontSize: 14,
   },
 });
