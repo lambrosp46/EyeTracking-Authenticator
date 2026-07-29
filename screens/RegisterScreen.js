@@ -3,11 +3,13 @@ import { View, Text, StyleSheet, TextInput, Image, TouchableOpacity, FlatList, S
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
 import { useAuth } from '../hooks/useAuth';
 import DbShow from '../components/dbShow';
+import ImageCapture from '../components/ImageCapture';
 
 export default function RegisterScreen({ navigation }) {
   const { addTest, dbTest, testData } = useAuth();
   const [username, setUsername] = useState('');
   const [displayData, setDisplayData] = useState(false);
+  const [imageUri, setImageUri] = useState(null);
 
   return (
     <SafeAreaProvider>
@@ -29,13 +31,12 @@ export default function RegisterScreen({ navigation }) {
             />
             
             <Text style={styles.registerText}>Ανεβάστε εικόνα για κωδικό</Text>
-            <TouchableOpacity style={styles.button} onPress={() => addTest({ username: username })}>
-              <Text style={styles.buttonText}>Test</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.button} onPress={() => {dbTest(); setDisplayData(!displayData)}} > 
-              <Text style={styles.buttonText}>{displayData ? 'Hide' : 'Display'}</Text>
-            </TouchableOpacity>
-            {displayData && <DbShow testData={testData} />}
+            
+            <ImageCapture 
+              imageUri={imageUri} 
+              onImageCapture={setImageUri}
+              label="Ανεβάστε εικόνα για κωδικό"
+            />
           </View>
         </ScrollView>
       </SafeAreaView>
