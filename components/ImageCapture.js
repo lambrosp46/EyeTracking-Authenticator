@@ -12,14 +12,31 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 
-export default function ImageCapture({ onImageSelected, value, label = 'Select image' }) {
-  const [imageUri, setImageUri] = useState(value ?? null);
+/**
+ * ImageCapture
+ * -------------
+ * Single unified component that lets the user pick an image via:
+ *   1. Camera (live capture)
+ *   2. Photo Library
+ *   3. Files (document picker)
+ *
+ * On iOS it shows the native ActionSheetIOS.
+ * On Android/Web it falls back to Alert.alert with buttons,
+ * since ActionSheetIOS only exists on iOS.
+ *
+ * Props:
+ *   - onImageCapture(uri: string): called with the picked image's local URI
+ *   - imageUri?: string              -> optional current image URI to preview
+ *   - label?: string                 -> optional label above the picker
+ */
+export default function ImageCapture({ onImageCapture, imageUri: externalUri, label = 'Select image' }) {
+  const [imageUri, setImageUri] = useState(externalUri ?? null);
   const [busy, setBusy] = useState(false);
 
   const handleResult = (uri) => {
     if (!uri) return;
     setImageUri(uri);
-    onImageSelected?.(uri);
+    onImageCapture?.(uri);
   };
 
   const openCamera = async () => {

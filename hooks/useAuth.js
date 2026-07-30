@@ -1,31 +1,69 @@
 import { useSQLiteContext } from 'expo-sqlite';
 import { useState } from 'react';
+import {
+  createUser,
+  savePoints,
+  getUserByUsername,
+  getUserPoints,
+  getImageUri,
+} from '../database/db';
 
 export function useAuth() {
-    const db = useSQLiteContext();
-    const [testData, setTestData] = useState([]);
+  const db = useSQLiteContext();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
-    async function dbTest() {
-        try {
-            const result = await db.getAllAsync('SELECT * FROM test;');
-            console.log('Database test result:', result);
-            setTestData(result);
-            return result;
-        } catch (error) {
-            console.error('Error executing database test:', error);
-        }
+  /**
+   * Registers a new user: saves the image permanently, creates the
+   * Users row, then saves the selected points.
+   * Throws if the username is already taken.
+   */
+  async function register(username, imageUri, points) {
+    setLoading(true);
+    setError(null);
+    try {
+      const trimmed = username.trim();
+      if (!trimmed) throw new Error('Username is required.');
+
+      const existing = await getUserByUsername(db, trimmed);
+      if (existing) throw new Error('Username already taken.');
+
+      const userId = await createUser(db, trimmed, imageUri);
+      await savePoints(db, userId, points);
+
+      return userId;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    } finally {
+      setLoading(false);
     }
+  }
 
-    async function addTest(data) {
-        try {
-            console.log('Adding test with data:', data);
-            await db.runAsync('INSERT INTO test (username) VALUES (?)', [data.username]);
-            console.log('Test data added successfully');
-            await dbTest(); // Refresh data after inserting
-        } catch (error) {
-            console.error('Error adding test data:', error);
-        }
+  /**
+   * Loads a user's stored image URI + points, ready for a login/verify screen.
+   * Returns null if the username doesn't exist.
+   */
+  async function loadForLogin(username) {
+    setLoading(true);
+    setError(null);
+    try {
+      const user = await getUserByUsername(db, username.trim());
+      if (!user) return null;
+
+      const points = await getUserPoints(db, user.id);
+      return {
+        userId: user.id,
+        imageUri: getImageUri(user.image_filename),
+        points, // stored points, to compare against a new attempt
+      };
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    } finally {
+      setLoading(false);
     }
+  }
 
-    return { dbTest, addTest, testData };
-};
+  return { register, loadForLogin, loading, error };
+}

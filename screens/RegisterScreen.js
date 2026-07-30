@@ -1,15 +1,50 @@
-import { React, useState } from 'react';
-import { View, Text, StyleSheet, TextInput, Image, TouchableOpacity, FlatList, ScrollView } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TextInput, Image, TouchableOpacity, ScrollView, ActivityIndicator, Alert, Modal } from 'react-native';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
 import { useAuth } from '../hooks/useAuth';
-import DbShow from '../components/dbShow';
 import ImageCapture from '../components/ImageCapture';
+import PointSelector from '../components/PointSelector';
 
 export default function RegisterScreen({ navigation }) {
-  const { addTest, dbTest, testData } = useAuth();
+  const { register, loading } = useAuth();
   const [username, setUsername] = useState('');
-  const [displayData, setDisplayData] = useState(false);
   const [imageUri, setImageUri] = useState(null);
+  const [points, setPoints] = useState(null);
+  const [pointsModalVisible, setPointsModalVisible] = useState(false);
+
+  const handleImageCapture = (uri) => {
+    setImageUri(uri);
+    setPoints(null);
+    setPointsModalVisible(true); // open the point-selection modal right after picking an image
+  };
+
+  // Called by PointSelector's own Confirm button — only reachable once
+  // all required points are placed. This just closes the modal and
+  // stores the points locally; it does NOT touch the database.
+  const handlePointsSelected = (selectedPoints) => {
+    setPoints(selectedPoints);
+    setPointsModalVisible(false);
+  };
+
+  // The only place that actually writes to the database.
+  const handleRegister = async () => {
+    if (!username.trim()) {
+      Alert.alert('Missing username', 'Please enter a username first.');
+      return;
+    }
+    if (!imageUri || !points) {
+      Alert.alert('Incomplete', 'Please select an image and your 5 points first.');
+      return;
+    }
+
+    try {
+      await register(username, imageUri, points);
+      Alert.alert('Success', 'Registration saved.');
+      navigation?.goBack?.();
+    } catch (err) {
+      Alert.alert('Error', err.message || 'Something went wrong while saving.');
+    }
+  };
 
   return (
     <SafeAreaProvider>
@@ -27,26 +62,67 @@ export default function RegisterScreen({ navigation }) {
               placeholder="Enter your username"
               placeholderTextColor="#6b7280"
               returnKeyType="done"
-              onChangeText={(text) => setUsername(text)}
+              value={username}
+              onChangeText={setUsername}
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!loading}
             />
-            
-            <ImageCapture 
-              imageUri={imageUri} 
-              onImageCapture={setImageUri}
+
+            <ImageCapture
+              imageUri={imageUri}
+              onImageCapture={handleImageCapture}
               label="Ανεβάστε εικόνα για κωδικό"
             />
-            <TouchableOpacity
-              style={styles.button}
-              onPress={() => {
-                addTest(username, imageUri);
-                setDisplayData(true);
-              }}
-            >
-              <Text style={styles.buttonText}>Register</Text>
-            </TouchableOpacity>
+
+            {imageUri && points && !loading && (
+              <TouchableOpacity onPress={() => setPointsModalVisible(true)} style={styles.secondaryButton}>
+                <Text style={styles.secondaryButtonText}>Αλλαγή σημείων</Text>
+              </TouchableOpacity>
+            )}
+
+            {loading && (
+              <View style={styles.loadingRow}>
+                <ActivityIndicator />
+                <Text style={styles.loadingText}>Saving…</Text>
+              </View>
+            )}
+
+            {points && !loading && (
+              <>
+                <View style={styles.successBox}>
+                  <Text style={styles.successText}>✓ {points.length} σημεία επιλέχθηκαν</Text>
+                </View>
+                <TouchableOpacity style={styles.registerButton} onPress={handleRegister}>
+                  <Text style={styles.registerButtonText}>Register</Text>
+                </TouchableOpacity>
+              </>
+            )}
           </View>
         </ScrollView>
       </SafeAreaView>
+
+      <Modal
+        visible={pointsModalVisible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setPointsModalVisible(false)}
+      >
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Επιλογή σημείων</Text>
+            <TouchableOpacity onPress={() => setPointsModalVisible(false)}>
+              <Text style={styles.modalCloseText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.modalBody}>
+            {imageUri && (
+              <PointSelector imageUri={imageUri} onComplete={handlePointsSelected} />
+            )}
+          </View>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaProvider>
   );
 }
@@ -59,8 +135,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 20,
     paddingTop: 20,
-    paddingBottomizontal: 20,
-    paddingTop: 20,
+    paddingBottom: 20,
   },
   header: {
     alignItems: 'center',
@@ -104,31 +179,77 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#111827',
   },
-  button: {
-    width: '100%',
-    height: 52,
-    borderRadius: 14,
+    registerButton: {
+    marginTop: 16,
     backgroundColor: '#4f46e5',
-    justifyContent: 'center',
+    borderRadius: 14,
+    minHeight: 52,
     alignItems: 'center',
-    marginTop: 10,
+    justifyContent: 'center',
+    paddingHorizontal: 20,
   },
-  buttonText: {
-    fontSize: 16,
-    fontWeight: '600',
+  registerButtonText: {
     color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
   },
-  itemContainer: {
-    backgroundColor: '#f3f4f6',
-    padding: 12,
+  secondaryButton: {
     marginTop: 12,
-    borderRadius: 8,
-    borderLeftWidth: 4,
-    borderLeftColor: '#4f46e5',
+    alignSelf: 'flex-start',
   },
-  itemText: {
+  secondaryButtonText: {
+    color: '#4f46e5',
+    fontWeight: '600',
     fontSize: 14,
-    color: '#374151',
-    marginBottom: 4,
+  },
+  loadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 16,
+  },
+  loadingText: {
+    fontSize: 14,
+    color: '#555',
+  },
+  successBox: {
+    marginTop: 16,
+    padding: 12,
+    backgroundColor: '#e8f5e9',
+    borderRadius: 12,
+  },
+  successText: {
+    color: '#2e7d32',
+    fontWeight: '600',
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 0,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  modalTitle: {
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: '700',
+    color: '#111827',
+    marginVertical: 2,
+  },
+  modalCloseText: {
+    color: '#4f46e5',
+    fontWeight: '600',
+    fontSize: 15,
+  },
+  modalBody: {
+    flex: 1,
+    paddingTop: 24,
   },
 });

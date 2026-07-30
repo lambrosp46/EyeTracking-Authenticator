@@ -3,25 +3,22 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SQLiteProvider } from 'expo-sqlite';
 
+import settings from './config/settings.json';
+import { initDb } from './database/db';
+
 import HomeScreen from './screens/HomeScreen';
 import LoginScreen from './screens/LoginScreen';
 import RegisterScreen from './screens/RegisterScreen';
 
 const Stack = createNativeStackNavigator();
 
-async function initializeDatabase(db) {
-  await db.execAsync(`
-    CREATE TABLE IF NOT EXISTS test (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      username TEXT NOT NULL,
-      created_at TEXT DEFAULT (datetime('now'))
-    );
-  `);
-}
-
 export default function App() {
   return (
-    <SQLiteProvider databaseName="EyeTracking-Auth.db" onInit={initializeDatabase}>
+    <SQLiteProvider
+      databaseName={settings.storage.dbName}
+      onInit={initDb}
+      onError={(error) => console.error('DB init failed:', error)}
+    >
       <NavigationContainer>
         <Stack.Navigator>
           <Stack.Screen name="Home" component={HomeScreen} />
