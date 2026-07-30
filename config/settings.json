@@ -2,7 +2,9 @@
   "pointSelector": {
     "showSelectedPoints": true,
     "maxPoints": 5,
-    "dotColor": "#007AFF"
+    "dotColor": "#007AFF",
+    "dotDiameterCm": 1.5,
+    "screenCoverage": 0.8
   },
   "authentication": {
     "toleranceRadius": 0.05,

@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,18 +7,30 @@ import {
   StyleSheet,
   Dimensions,
 } from 'react-native';
-import settings from '../config/settings.json';
+import settings from '../../../../Downloads/files/config/settings.json';
+import { cmToPoints } from '../utils/physicalSize';
 
-const DOT_SIZE = 28;
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const IMAGE_SIZE = SCREEN_WIDTH - 48; // 24px padding on each side
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const COVERAGE = settings.pointSelector.screenCoverage;
+const MAX_BOX_WIDTH = SCREEN_WIDTH * COVERAGE;
+const MAX_BOX_HEIGHT = SCREEN_HEIGHT * COVERAGE;
+const DOT_SIZE = cmToPoints(settings.pointSelector.dotDiameterCm);
 
 /**
  * PointSelector
  * --------------
- * Displays an image and lets the user tap up to MAX_POINTS points on it.
+ * Displays an image and lets the user tap up to maxPoints points on it.
  * Points are stored as normalized coordinates { x, y } in the [0, 1] range,
  * so they stay valid regardless of screen size / resolution.
+ *
+ * The image is sized to fit, without cropping, inside a bounding box that's
+ * `screenCoverage` (settings.json, default 80%) of the screen's width and
+ * height — matching the password-space assumption that the usable area is
+ * ~80% of the physical screen. We read the image's real dimensions first
+ * (Image.getSize) and fit it to that box preserving aspect ratio, so the
+ * displayed area always matches the actual visible image exactly (no
+ * letterboxing, no cropped edges) — which keeps tap-to-normalized-coordinate
+ * mapping accurate.
  *
  * Props:
  *   - imageUri: string                        -> required, the image to show
@@ -36,7 +48,34 @@ export default function PointSelector({
   showMarkers = settings.pointSelector.showSelectedPoints,
 }) {
   const [points, setPoints] = useState([]);
-  const [layout, setLayout] = useState({ width: IMAGE_SIZE, height: IMAGE_SIZE });
+  const [boxSize, setBoxSize] = useState({ width: MAX_BOX_WIDTH, height: MAX_BOX_WIDTH });
+  const [layout, setLayout] = useState({ width: MAX_BOX_WIDTH, height: MAX_BOX_WIDTH });
+
+  // Figure out the image's real aspect ratio and fit it inside the
+  // screenCoverage bounding box without cropping.
+  useEffect(() => {
+    if (!imageUri) return;
+
+    Image.getSize(
+      imageUri,
+      (naturalWidth, naturalHeight) => {
+        const aspect = naturalWidth / naturalHeight;
+        let width = MAX_BOX_WIDTH;
+        let height = width / aspect;
+
+        if (height > MAX_BOX_HEIGHT) {
+          height = MAX_BOX_HEIGHT;
+          width = height * aspect;
+        }
+
+        setBoxSize({ width, height });
+      },
+      (error) => {
+        console.warn('PointSelector: could not read image size, using square fallback', error);
+        setBoxSize({ width: MAX_BOX_WIDTH, height: MAX_BOX_WIDTH });
+      }
+    );
+  }, [imageUri]);
 
   const handleLayout = useCallback((e) => {
     const { width, height } = e.nativeEvent.layout;
@@ -64,11 +103,14 @@ export default function PointSelector({
         Επίλεξε {maxPoints} σημεία στην εικόνα ({points.length}/{maxPoints})
       </Text>
 
-      <Pressable onPress={handlePress} style={styles.imageWrapper}>
+      <Pressable
+        onPress={handlePress}
+        style={[styles.imageWrapper, { width: boxSize.width, height: boxSize.height }]}
+      >
         <Image
           source={{ uri: imageUri }}
           style={styles.image}
-          resizeMode="cover"
+          resizeMode="contain"
           onLayout={handleLayout}
         />
         {showMarkers &&
@@ -126,7 +168,7 @@ export default function PointSelector({
 const styles = StyleSheet.create({
   container: {
     alignItems: 'center',
-    paddingHorizontal: 24,
+    paddingHorizontal: 16,
   },
   title: {
     fontSize: 15,
@@ -135,8 +177,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   imageWrapper: {
-    width: IMAGE_SIZE,
-    height: IMAGE_SIZE,
     borderRadius: 12,
     overflow: 'hidden',
     backgroundColor: '#eee',

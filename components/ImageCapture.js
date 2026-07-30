@@ -29,7 +29,12 @@ import * as DocumentPicker from 'expo-document-picker';
  *   - imageUri?: string              -> optional current image URI to preview
  *   - label?: string                 -> optional label above the picker
  */
-export default function ImageCapture({ onImageCapture, imageUri: externalUri, label = 'Select image' }) {
+export default function ImageCapture({
+  onImageCapture,
+  imageUri: externalUri,
+  label = 'Select image',
+  showPreview = true,
+}) {
   const [imageUri, setImageUri] = useState(externalUri ?? null);
   const [busy, setBusy] = useState(false);
 
@@ -125,26 +130,44 @@ export default function ImageCapture({ onImageCapture, imageUri: externalUri, la
     <View style={styles.container}>
       {label ? <Text style={styles.label}>{label}</Text> : null}
 
-      <TouchableOpacity
-        style={styles.picker}
-        onPress={presentPicker}
-        disabled={busy}
-        activeOpacity={0.7}
-      >
-        {imageUri ? (
-          <Image source={{ uri: imageUri }} style={styles.preview} />
-        ) : (
-          <Text style={styles.placeholderText}>
-            {busy ? 'Loading…' : 'Tap to add image'}
-          </Text>
-        )}
-      </TouchableOpacity>
+      {showPreview ? (
+        <>
+          <TouchableOpacity
+            style={styles.picker}
+            onPress={presentPicker}
+            disabled={busy}
+            activeOpacity={0.7}
+          >
+            {imageUri ? (
+              <Image source={{ uri: imageUri }} style={styles.preview} />
+            ) : (
+              <Text style={styles.placeholderText}>
+                {busy ? 'Loading…' : 'Tap to add image'}
+              </Text>
+            )}
+          </TouchableOpacity>
 
-      {imageUri ? (
-        <TouchableOpacity onPress={presentPicker} disabled={busy}>
-          <Text style={styles.changeText}>Change image</Text>
+          {imageUri ? (
+            <TouchableOpacity onPress={presentPicker} disabled={busy}>
+              <Text style={styles.changeText}>Change image</Text>
+            </TouchableOpacity>
+          ) : null}
+        </>
+      ) : (
+        <TouchableOpacity
+          style={styles.compactRow}
+          onPress={presentPicker}
+          disabled={busy}
+          activeOpacity={0.7}
+        >
+          <View style={[styles.compactBadge, imageUri && styles.compactBadgeDone]}>
+            <Text style={styles.compactBadgeText}>{imageUri ? '✓' : '+'}</Text>
+          </View>
+          <Text style={styles.compactText}>
+            {busy ? 'Loading…' : imageUri ? 'Αλλαγή εικόνας' : 'Προσθήκη εικόνας'}
+          </Text>
         </TouchableOpacity>
-      ) : null}
+      )}
     </View>
   );
 }
@@ -185,5 +208,38 @@ const styles = StyleSheet.create({
     marginTop: 8,
     color: '#007AFF',
     fontSize: 14,
+  },
+  compactRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: '#fafafa',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  compactBadge: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#ccc',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  compactBadgeDone: {
+    backgroundColor: '#22c55e',
+  },
+  compactBadgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  compactText: {
+    color: '#007AFF',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

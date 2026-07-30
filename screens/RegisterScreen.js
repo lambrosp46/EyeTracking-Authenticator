@@ -26,6 +26,12 @@ export default function RegisterScreen({ navigation }) {
     setPointsModalVisible(false);
   };
 
+  // Cancel button in the modal header — closes without saving.
+  // Any previously confirmed points (if the user was re-selecting) are left untouched.
+  const handleCancelPoints = () => {
+    setPointsModalVisible(false);
+  };
+
   // The only place that actually writes to the database.
   const handleRegister = async () => {
     if (!username.trim()) {
@@ -59,7 +65,7 @@ export default function RegisterScreen({ navigation }) {
             <Text style={styles.registerText}>Username</Text>
             <TextInput
               style={styles.input}
-              placeholder="Enter your username"
+              placeholder="Πληκτρολογήστε username"
               placeholderTextColor="#6b7280"
               returnKeyType="done"
               value={username}
@@ -73,7 +79,14 @@ export default function RegisterScreen({ navigation }) {
               imageUri={imageUri}
               onImageCapture={handleImageCapture}
               label="Ανεβάστε εικόνα για κωδικό"
+              showPreview={false}
             />
+
+            {imageUri && !points && !loading && (
+              <TouchableOpacity onPress={() => setPointsModalVisible(true)} style={styles.secondaryButton}>
+                <Text style={styles.secondaryButtonText}>Επιλογή σημείων</Text>
+              </TouchableOpacity>
+            )}
 
             {imageUri && points && !loading && (
               <TouchableOpacity onPress={() => setPointsModalVisible(true)} style={styles.secondaryButton}>
@@ -106,22 +119,24 @@ export default function RegisterScreen({ navigation }) {
         visible={pointsModalVisible}
         animationType="slide"
         presentationStyle="fullScreen"
-        onRequestClose={() => setPointsModalVisible(false)}
+        onRequestClose={handleCancelPoints}
       >
-        <SafeAreaView style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Επιλογή σημείων</Text>
-            <TouchableOpacity onPress={() => setPointsModalVisible(false)}>
-              <Text style={styles.modalCloseText}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
+        <SafeAreaProvider>
+          <SafeAreaView style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Επιλογή σημείων</Text>
+              <TouchableOpacity onPress={handleCancelPoints}>
+                <Text style={styles.modalCancelText}>Άκυρο</Text>
+              </TouchableOpacity>
+            </View>
 
-          <View style={styles.modalBody}>
-            {imageUri && (
-              <PointSelector imageUri={imageUri} onComplete={handlePointsSelected} />
-            )}
-          </View>
-        </SafeAreaView>
+            <View style={styles.modalBody}>
+              {imageUri && (
+                <PointSelector imageUri={imageUri} onComplete={handlePointsSelected} />
+              )}
+            </View>
+          </SafeAreaView>
+        </SafeAreaProvider>
       </Modal>
     </SafeAreaProvider>
   );
@@ -164,9 +179,10 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   registerText: {
-    fontSize: 15,
-    color: '#374151',
-    marginBottom: 10,
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+    alignSelf: 'flex-start',
   },
   input: {
     width: '100%',
@@ -178,20 +194,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     fontSize: 16,
     color: '#111827',
-  },
-    registerButton: {
-    marginTop: 16,
-    backgroundColor: '#4f46e5',
-    borderRadius: 14,
-    minHeight: 52,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 20,
-  },
-  registerButtonText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '700',
   },
   secondaryButton: {
     marginTop: 12,
@@ -222,6 +224,19 @@ const styles = StyleSheet.create({
     color: '#2e7d32',
     fontWeight: '600',
   },
+  registerButton: {
+    marginTop: 16,
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: '#4f46e5',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  registerButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#ffffff',
+  },
   modalContainer: {
     flex: 1,
     backgroundColor: '#fff',
@@ -231,20 +246,17 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingTop: 0,
-    paddingBottom: 16,
+    paddingVertical: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
   },
   modalTitle: {
     fontSize: 17,
-    lineHeight: 22,
     fontWeight: '700',
     color: '#111827',
-    marginVertical: 2,
   },
-  modalCloseText: {
-    color: '#4f46e5',
+  modalCancelText: {
+    color: '#dc2626',
     fontWeight: '600',
     fontSize: 15,
   },
