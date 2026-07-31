@@ -15,7 +15,7 @@ export async function initDb(db) {
 
     CREATE TABLE IF NOT EXISTS Users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      username TEXT NOT NULL UNIQUE,
+      username TEXT NOT NULL UNIQUE COLLATE NOCASE,
       image_filename TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );

@@ -6,14 +6,15 @@ import {
   Pressable,
   StyleSheet,
   Dimensions,
+  ScrollView,
 } from 'react-native';
 import settings from '../config/settings.json';
 import { cmToPoints } from '../utils/physicalSize';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const COVERAGE = settings.pointSelector.screenCoverage;
-const MAX_BOX_WIDTH = SCREEN_WIDTH * COVERAGE;
-const MAX_BOX_HEIGHT = SCREEN_HEIGHT * COVERAGE;
+const BOX_WIDTH = SCREEN_WIDTH * COVERAGE; // width is always fixed at this — never shrinks
+const MAX_BOX_HEIGHT = SCREEN_HEIGHT * 1.5; // generous safety cap for extreme aspect ratios; scrollable beyond screen height
 const DOT_SIZE = cmToPoints(settings.pointSelector.dotDiameterCm);
 
 /**
@@ -48,11 +49,14 @@ export default function PointSelector({
   showMarkers = settings.pointSelector.showSelectedPoints,
 }) {
   const [points, setPoints] = useState([]);
-  const [boxSize, setBoxSize] = useState({ width: MAX_BOX_WIDTH, height: MAX_BOX_WIDTH });
-  const [layout, setLayout] = useState({ width: MAX_BOX_WIDTH, height: MAX_BOX_WIDTH });
+  const [boxSize, setBoxSize] = useState({ width: BOX_WIDTH, height: BOX_WIDTH });
+  const [layout, setLayout] = useState({ width: BOX_WIDTH, height: BOX_WIDTH });
 
-  // Figure out the image's real aspect ratio and fit it inside the
-  // screenCoverage bounding box without cropping.
+  // Width is always fixed at `screenCoverage` of the screen — this is what
+  // eliminates the left/right empty gap. Height is derived from the image's
+  // real aspect ratio and allowed to grow freely (the screen scrolls if it
+  // doesn't fit), only capped by a generous safety limit for extreme
+  // aspect-ratio images.
   useEffect(() => {
     if (!imageUri) return;
 
@@ -60,7 +64,7 @@ export default function PointSelector({
       imageUri,
       (naturalWidth, naturalHeight) => {
         const aspect = naturalWidth / naturalHeight;
-        let width = MAX_BOX_WIDTH;
+        let width = BOX_WIDTH;
         let height = width / aspect;
 
         if (height > MAX_BOX_HEIGHT) {
@@ -72,7 +76,7 @@ export default function PointSelector({
       },
       (error) => {
         console.warn('PointSelector: could not read image size, using square fallback', error);
-        setBoxSize({ width: MAX_BOX_WIDTH, height: MAX_BOX_WIDTH });
+        setBoxSize({ width: BOX_WIDTH, height: BOX_WIDTH });
       }
     );
   }, [imageUri]);
@@ -98,7 +102,7 @@ export default function PointSelector({
   const isComplete = points.length === maxPoints;
 
   return (
-    <View style={styles.container}>
+    <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>
         Επίλεξε {maxPoints} σημεία στην εικόνα ({points.length}/{maxPoints})
       </Text>
@@ -161,20 +165,21 @@ export default function PointSelector({
           <Text style={styles.primaryButtonText}>Confirm</Text>
         </Pressable>
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingBottom: 32,
   },
   title: {
     fontSize: 15,
     fontWeight: '600',
     marginBottom: 12,
     textAlign: 'center',
+    paddingHorizontal: 16,
   },
   imageWrapper: {
     borderRadius: 12,
@@ -205,6 +210,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     marginTop: 16,
+    paddingHorizontal: 16,
   },
   button: {
     paddingVertical: 10,

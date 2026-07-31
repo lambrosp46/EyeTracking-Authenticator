@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
+import { cropToStandardAspectRatio } from '../utils/imageAspect';
 
 /**
  * ImageCapture
@@ -38,10 +39,11 @@ export default function ImageCapture({
   const [imageUri, setImageUri] = useState(externalUri ?? null);
   const [busy, setBusy] = useState(false);
 
-  const handleResult = (uri) => {
+  const handleResult = async (uri) => {
     if (!uri) return;
-    setImageUri(uri);
-    onImageCapture?.(uri);
+    const croppedUri = await cropToStandardAspectRatio(uri);
+    setImageUri(croppedUri);
+    onImageCapture?.(croppedUri);
   };
 
   const openCamera = async () => {
@@ -58,7 +60,7 @@ export default function ImageCapture({
         allowsEditing: false,
       });
       if (!result.canceled) {
-        handleResult(result.assets[0].uri);
+        await handleResult(result.assets[0].uri);
       }
     } finally {
       setBusy(false);
@@ -79,7 +81,7 @@ export default function ImageCapture({
         allowsEditing: false,
       });
       if (!result.canceled) {
-        handleResult(result.assets[0].uri);
+        await handleResult(result.assets[0].uri);
       }
     } finally {
       setBusy(false);
@@ -95,7 +97,7 @@ export default function ImageCapture({
         multiple: false,
       });
       if (!result.canceled) {
-        handleResult(result.assets[0].uri);
+        await handleResult(result.assets[0].uri);
       }
     } finally {
       setBusy(false);

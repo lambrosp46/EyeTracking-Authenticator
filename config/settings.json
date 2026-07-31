@@ -4,7 +4,7 @@
     "maxPoints": 5,
     "dotColor": "#007AFF",
     "dotDiameterCm": 1.5,
-    "screenCoverage": 0.8
+    "screenCoverage": 0.98
   },
   "authentication": {
     "toleranceRadius": 0.05,
@@ -13,5 +13,9 @@
   "storage": {
     "dbName": "eyetracking_auth.db",
     "imagesFolder": "images"
+  },
+  "imageProcessing": {
+    "standardAspectWidth": 16,
+    "standardAspectHeight": 9
   }
 }
