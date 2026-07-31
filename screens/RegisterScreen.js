@@ -123,16 +123,13 @@ export default function RegisterScreen({ navigation }) {
       >
         <SafeAreaProvider>
           <SafeAreaView style={styles.modalContainer}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Επιλογή σημείων</Text>
-              <TouchableOpacity onPress={handleCancelPoints}>
-                <Text style={styles.modalCancelText}>Άκυρο</Text>
-              </TouchableOpacity>
-            </View>
-
             <View style={styles.modalBody}>
               {imageUri && (
-                <PointSelector imageUri={imageUri} onComplete={handlePointsSelected} />
+                <PointSelector
+                  imageUri={imageUri}
+                  onComplete={handlePointsSelected}
+                  onCancel={handleCancelPoints}
+                />
               )}
             </View>
           </SafeAreaView>
@@ -241,27 +238,8 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#fff',
   },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  modalTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#111827',
-  },
-  modalCancelText: {
-    color: '#dc2626',
-    fontWeight: '600',
-    fontSize: 15,
-  },
   modalBody: {
     flex: 1,
-    paddingTop: 24,
+    paddingTop: 16,
   },
 });

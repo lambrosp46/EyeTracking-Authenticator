@@ -6,7 +6,6 @@ import {
   Pressable,
   StyleSheet,
   Dimensions,
-  ScrollView,
 } from 'react-native';
 import settings from '../config/settings.json';
 import { cmToPoints } from '../utils/physicalSize';
@@ -41,10 +40,12 @@ const DOT_SIZE = cmToPoints(settings.pointSelector.dotDiameterCm);
  *                                                  Defaults to settings.json -> pointSelector.showSelectedPoints.
  *                                                  Useful to set to false during login/verification,
  *                                                  so a shoulder-surfer can't see the pattern being entered.
+ *   - onCancel?: () => void                     -> if provided, renders a Cancel button alongside the others.
  */
 export default function PointSelector({
   imageUri,
   onComplete,
+  onCancel,
   maxPoints = settings.pointSelector.maxPoints,
   showMarkers = settings.pointSelector.showSelectedPoints,
 }) {
@@ -102,7 +103,7 @@ export default function PointSelector({
   const isComplete = points.length === maxPoints;
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <View style={styles.container}>
       <Text style={styles.title}>
         Επίλεξε {maxPoints} σημεία στην εικόνα ({points.length}/{maxPoints})
       </Text>
@@ -137,6 +138,12 @@ export default function PointSelector({
       </Pressable>
 
       <View style={styles.actions}>
+        {onCancel && (
+          <Pressable style={[styles.button, styles.secondaryButton]} onPress={onCancel}>
+            <Text style={styles.cancelButtonText}>Άκυρο</Text>
+          </Pressable>
+        )}
+
         <Pressable
           style={[styles.button, styles.secondaryButton]}
           onPress={undoLast}
@@ -165,14 +172,15 @@ export default function PointSelector({
           <Text style={styles.primaryButtonText}>Confirm</Text>
         </Pressable>
       </View>
-    </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
     alignItems: 'center',
-    paddingBottom: 32,
+    justifyContent: 'center',
   },
   title: {
     fontSize: 15,
@@ -229,6 +237,10 @@ const styles = StyleSheet.create({
   },
   secondaryButtonText: {
     color: '#333',
+    fontWeight: '600',
+  },
+  cancelButtonText: {
+    color: '#dc2626',
     fontWeight: '600',
   },
   buttonDisabled: {
