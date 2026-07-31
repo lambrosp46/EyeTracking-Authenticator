@@ -7,7 +7,7 @@ import {
   StyleSheet,
   Dimensions,
 } from 'react-native';
-import settings from '../../../../Downloads/files/config/settings.json';
+import settings from '../config/settings.json';
 import { cmToPoints } from '../utils/physicalSize';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
