@@ -13,7 +13,7 @@ import { cmToPoints } from '../utils/physicalSize';
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const COVERAGE = settings.pointSelector.screenCoverage;
 const BOX_WIDTH = SCREEN_WIDTH * COVERAGE; // width is always fixed at this — never shrinks
-const MAX_BOX_HEIGHT = SCREEN_HEIGHT * 1.5; // generous safety cap for extreme aspect ratios; scrollable beyond screen height
+const MAX_BOX_HEIGHT = SCREEN_HEIGHT * 1.5; // generous safety cap for extreme aspect ratios;
 const DOT_SIZE = cmToPoints(settings.pointSelector.dotDiameterCm);
 
 /**

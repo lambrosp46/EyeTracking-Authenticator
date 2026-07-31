@@ -9,6 +9,7 @@ import { initDb } from './database/db';
 import HomeScreen from './screens/HomeScreen';
 import LoginScreen from './screens/LoginScreen';
 import RegisterScreen from './screens/RegisterScreen';
+import AuthPointsScreen from './screens/AuthPointsScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -23,7 +24,8 @@ export default function App() {
         <Stack.Navigator>
           <Stack.Screen name="Home" component={HomeScreen} />
           <Stack.Screen name="Register" component={RegisterScreen} />
-          {/*<Stack.Screen name="Login" component={LoginScreen} /> */}
+          <Stack.Screen name="Login" component={LoginScreen} />
+          <Stack.Screen name="AuthPoints" component={AuthPointsScreen} />
         </Stack.Navigator>
       </NavigationContainer>
     </SQLiteProvider>
