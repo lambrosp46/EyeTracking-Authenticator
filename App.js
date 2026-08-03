@@ -25,7 +25,11 @@ export default function App() {
           <Stack.Screen name="Home" component={HomeScreen} />
           <Stack.Screen name="Register" component={RegisterScreen} />
           <Stack.Screen name="Login" component={LoginScreen} />
-          <Stack.Screen name="AuthPoints" component={AuthPointsScreen} />
+          <Stack.Screen
+            name="AuthPoints"
+            component={AuthPointsScreen}
+            options={{ headerShown: false }}
+          />
         </Stack.Navigator>
       </NavigationContainer>
     </SQLiteProvider>

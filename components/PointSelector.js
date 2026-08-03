@@ -13,7 +13,7 @@ import { cmToPoints } from '../utils/physicalSize';
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const COVERAGE = settings.pointSelector.screenCoverage;
 const BOX_WIDTH = SCREEN_WIDTH * COVERAGE; // width is always fixed at this — never shrinks
-const MAX_BOX_HEIGHT = SCREEN_HEIGHT * 1.5; // generous safety cap for extreme aspect ratios;
+const MAX_BOX_HEIGHT = SCREEN_HEIGHT * 1.5; // generous safety cap for extreme aspect ratios; scrollable beyond screen height
 const DOT_SIZE = cmToPoints(settings.pointSelector.dotDiameterCm);
 
 /**
@@ -24,23 +24,32 @@ const DOT_SIZE = cmToPoints(settings.pointSelector.dotDiameterCm);
  * so they stay valid regardless of screen size / resolution.
  *
  * The image is sized to fit, without cropping, inside a bounding box that's
- * `screenCoverage` (settings.json, default 80%) of the screen's width and
- * height — matching the password-space assumption that the usable area is
- * ~80% of the physical screen. We read the image's real dimensions first
- * (Image.getSize) and fit it to that box preserving aspect ratio, so the
- * displayed area always matches the actual visible image exactly (no
- * letterboxing, no cropped edges) — which keeps tap-to-normalized-coordinate
- * mapping accurate.
+ * `screenCoverage` (settings.json) of the screen's width — a fixed width
+ * that never shrinks, so there's no left/right gap regardless of what else
+ * is shown around it. Height is derived from the image's real aspect ratio
+ * (Image.getSize) and allowed to grow freely, only capped by a generous
+ * safety limit for extreme aspect-ratio images (screen scrolls if needed).
  *
  * Props:
  *   - imageUri: string                        -> required, the image to show
  *   - onComplete(points): void                 -> called once maxPoints are picked, then user confirms
+ *   - onCancel?: () => void                     -> if provided, renders a Cancel button alongside the others.
  *   - maxPoints?: number                       -> defaults to settings.json -> pointSelector.maxPoints
  *   - showMarkers?: boolean                    -> whether to draw dots where the user tapped.
  *                                                  Defaults to settings.json -> pointSelector.showSelectedPoints.
  *                                                  Useful to set to false during login/verification,
  *                                                  so a shoulder-surfer can't see the pattern being entered.
- *   - onCancel?: () => void                     -> if provided, renders a Cancel button alongside the others.
+ *   - showInstructions?: boolean                -> whether to show the "Επίλεξε N σημεία..." title. Defaults to true.
+ *   - showCounter?: boolean                     -> if showInstructions is false, whether to show a plain
+ *                                                  "x/maxPoints" counter in the same spot instead. Defaults to false.
+ *   - showUndo?: boolean                        -> whether to render the Undo button. Defaults to true.
+ *   - showReset?: boolean                       -> whether to render the Reset button. Defaults to true.
+ *   - showConfirmButton?: boolean               -> whether to render the Confirm button. Defaults to true.
+ *   - autoSubmit?: boolean                      -> if true, calls onComplete automatically once maxPoints
+ *                                                  are picked, without waiting for a Confirm tap. Defaults to false.
+ *
+ * If none of onCancel / showUndo / showReset / showConfirmButton apply, the
+ * whole bottom action row is omitted, so the image gets that space too.
  */
 export default function PointSelector({
   imageUri,
@@ -48,10 +57,19 @@ export default function PointSelector({
   onCancel,
   maxPoints = settings.pointSelector.maxPoints,
   showMarkers = settings.pointSelector.showSelectedPoints,
+  showInstructions = true,
+  showCounter = false,
+  showUndo = true,
+  showReset = true,
+  showConfirmButton = true,
+  autoSubmit = false,
 }) {
   const [points, setPoints] = useState([]);
   const [boxSize, setBoxSize] = useState({ width: BOX_WIDTH, height: BOX_WIDTH });
   const [layout, setLayout] = useState({ width: BOX_WIDTH, height: BOX_WIDTH });
+
+  const showCancel = !!onCancel;
+  const showActionsRow = showCancel || showUndo || showReset || showConfirmButton;
 
   // Width is always fixed at `screenCoverage` of the screen — this is what
   // eliminates the left/right empty gap. Height is derived from the image's
@@ -94,7 +112,12 @@ export default function PointSelector({
     const x = Math.min(Math.max(locationX / layout.width, 0), 1);
     const y = Math.min(Math.max(locationY / layout.height, 0), 1);
 
-    setPoints((prev) => [...prev, { x, y }]);
+    const newPoints = [...points, { x, y }];
+    setPoints(newPoints);
+
+    if (autoSubmit && newPoints.length === maxPoints) {
+      onComplete?.(newPoints);
+    }
   };
 
   const undoLast = () => setPoints((prev) => prev.slice(0, -1));
@@ -104,9 +127,16 @@ export default function PointSelector({
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>
-        Επίλεξε {maxPoints} σημεία στην εικόνα ({points.length}/{maxPoints})
-      </Text>
+      {showInstructions && (
+        <Text style={styles.title}>
+          Επίλεξε {maxPoints} σημεία στην εικόνα ({points.length}/{maxPoints})
+        </Text>
+      )}
+      {!showInstructions && showCounter && (
+        <Text style={styles.title}>
+          {points.length}/{maxPoints}
+        </Text>
+      )}
 
       <Pressable
         onPress={handlePress}
@@ -137,50 +167,56 @@ export default function PointSelector({
           ))}
       </Pressable>
 
-      <View style={styles.actions}>
-        {onCancel && (
-          <Pressable style={[styles.button, styles.secondaryButton]} onPress={onCancel}>
-            <Text style={styles.cancelButtonText}>Άκυρο</Text>
-          </Pressable>
-        )}
+      {showActionsRow && (
+        <View style={styles.actions}>
+          {showCancel && (
+            <Pressable style={[styles.button, styles.secondaryButton]} onPress={onCancel}>
+              <Text style={styles.cancelButtonText}>Άκυρο</Text>
+            </Pressable>
+          )}
 
-        <Pressable
-          style={[styles.button, styles.secondaryButton]}
-          onPress={undoLast}
-          disabled={points.length === 0}
-        >
-          <Text style={styles.secondaryButtonText}>Undo</Text>
-        </Pressable>
+          {showUndo && (
+            <Pressable
+              style={[styles.button, styles.secondaryButton]}
+              onPress={undoLast}
+              disabled={points.length === 0}
+            >
+              <Text style={styles.secondaryButtonText}>Undo</Text>
+            </Pressable>
+          )}
 
-        <Pressable
-          style={[styles.button, styles.secondaryButton]}
-          onPress={reset}
-          disabled={points.length === 0}
-        >
-          <Text style={styles.secondaryButtonText}>Reset</Text>
-        </Pressable>
+          {showReset && (
+            <Pressable
+              style={[styles.button, styles.secondaryButton]}
+              onPress={reset}
+              disabled={points.length === 0}
+            >
+              <Text style={styles.secondaryButtonText}>Reset</Text>
+            </Pressable>
+          )}
 
-        <Pressable
-          style={[
-            styles.button,
-            styles.primaryButton,
-            !isComplete && styles.buttonDisabled,
-          ]}
-          onPress={() => isComplete && onComplete?.(points)}
-          disabled={!isComplete}
-        >
-          <Text style={styles.primaryButtonText}>Confirm</Text>
-        </Pressable>
-      </View>
+          {showConfirmButton && (
+            <Pressable
+              style={[
+                styles.button,
+                styles.primaryButton,
+                !isComplete && styles.buttonDisabled,
+              ]}
+              onPress={() => isComplete && onComplete?.(points)}
+              disabled={!isComplete}
+            >
+              <Text style={styles.primaryButtonText}>Confirm</Text>
+            </Pressable>
+          )}
+        </View>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
     alignItems: 'center',
-    justifyContent: 'center',
   },
   title: {
     fontSize: 15,

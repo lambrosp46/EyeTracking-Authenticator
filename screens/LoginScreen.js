@@ -2,12 +2,15 @@ import React, { useState } from 'react';
 import {
   View,
   Text,
+  Image,
   TextInput,
   TouchableOpacity,
+  ScrollView,
   StyleSheet,
   Alert,
   ActivityIndicator,
 } from 'react-native';
+import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
 import { useAuth } from '../hooks/useAuth';
 
 export default function LoginScreen({ navigation }) {
@@ -39,63 +42,120 @@ export default function LoginScreen({ navigation }) {
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Login</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="Username"
-        value={username}
-        onChangeText={setUsername}
-        autoCapitalize="none"
-        editable={!loading}
-      />
-      <TouchableOpacity style={styles.button} onPress={handleLogin} disabled={loading}>
-        {loading ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.buttonText}>Login</Text>
-        )}
-      </TouchableOpacity>
-    </View>
+    <SafeAreaProvider>
+      <SafeAreaView style={styles.container}>
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={true}>
+          <View style={styles.header}>
+            <Image source={require('../assets/logo-pan-patron.gif')} style={styles.logo} />
+            <Text style={styles.loginTitle}>Τμήμα Μηχανικών Η/Υ & Πληροφορικής</Text>
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Text style={styles.loginText}>Username</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Πληκτρολογήστε username"
+              placeholderTextColor="#6b7280"
+              returnKeyType="done"
+              value={username}
+              onChangeText={setUsername}
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!loading}
+            />
+
+            {loading ? (
+              <View style={styles.loadingRow}>
+                <ActivityIndicator />
+                <Text style={styles.loadingText}>Συνδέεση…</Text>
+              </View>
+            ) : (
+              <TouchableOpacity style={styles.loginButton} onPress={handleLogin}>
+                <Text style={styles.loginButtonText}>Login</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    </SafeAreaProvider>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    alignItems: 'center',
+    backgroundColor: '#f9fafb',
+  },
+  scrollContent: {
+    flexGrow: 1,
     justifyContent: 'center',
-    padding: 20,
-    backgroundColor: '#fff',
+    paddingHorizontal: 20,
+    paddingVertical: 20,
   },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 20,
+  header: {
+    alignItems: 'center',
+    marginBottom: 32,
   },
-  subtitle: {
+  logo: {
+    width: 110,
+    height: 110,
+    marginBottom: 16,
+  },
+  loginTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#111827',
+    textAlign: 'center',
+  },
+  inputContainer: {
+    width: '100%',
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    padding: 18,
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 6,
+  },
+  loginText: {
     fontSize: 14,
-    color: '#555',
-    marginBottom: 10,
+    fontWeight: '600',
+    marginBottom: 8,
+    alignSelf: 'flex-start',
   },
   input: {
     width: '100%',
+    height: 52,
     borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 20,
+    borderColor: '#d1d5db',
+    borderRadius: 14,
+    backgroundColor: '#f8fafc',
+    paddingHorizontal: 16,
+    fontSize: 16,
+    color: '#111827',
   },
-  button: {
-    backgroundColor: '#007AFF',
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 8,
+  loadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 16,
+  },
+  loadingText: {
+    fontSize: 14,
+    color: '#555',
+  },
+  loginButton: {
+    marginTop: 16,
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: '#4f46e5',
+    justifyContent: 'center',
     alignItems: 'center',
   },
-  buttonText: {
-    color: '#fff',
-    fontWeight: '600',
+  loginButtonText: {
     fontSize: 16,
+    fontWeight: '600',
+    color: '#ffffff',
   },
 });
