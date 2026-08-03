@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
-import { cropToStandardAspectRatio } from '../utils/imageAspect';
+import { cropToStandardAspectRatio, isLandscapeImage } from '../utils/imageAspect';
 
 /**
  * ImageCapture
@@ -41,6 +41,22 @@ export default function ImageCapture({
 
   const handleResult = async (uri) => {
     if (!uri) return;
+
+    let landscape = false;
+    try {
+      landscape = await isLandscapeImage(uri);
+    } catch (error) {
+      console.warn('ImageCapture: could not check image orientation', error);
+    }
+
+    if (landscape) {
+      Alert.alert(
+        'Μη έγκυρη εικόνα',
+        'Οι οριζόντιες (16:9) εικόνες δεν επιτρέπονται. Παρακαλώ επιλέξτε μια κάθετη εικόνα.'
+      );
+      return;
+    }
+
     const croppedUri = await cropToStandardAspectRatio(uri);
     setImageUri(croppedUri);
     onImageCapture?.(croppedUri);

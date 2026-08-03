@@ -4,6 +4,10 @@ import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
 import { useAuth } from '../hooks/useAuth';
 import ImageCapture from '../components/ImageCapture';
 import PointSelector from '../components/PointSelector';
+import settings from '../config/settings.json';
+import { pointsMatch } from '../utils/points';
+
+const { toleranceRadius } = settings.authentication;
 
 export default function RegisterScreen({ navigation }) {
   const { register, loading } = useAuth();
@@ -12,24 +16,69 @@ export default function RegisterScreen({ navigation }) {
   const [points, setPoints] = useState(null);
   const [pointsModalVisible, setPointsModalVisible] = useState(false);
 
+  // Registration requires the user to pick their points twice, like a
+  // password-confirmation field, so a mis-tap on the only pass doesn't
+  // silently become their permanent (and un-repeatable) login pattern.
+  // 'select' = first pass, 'confirm' = must repeat the same points.
+  const [pointsStage, setPointsStage] = useState('select');
+  const [pendingPoints, setPendingPoints] = useState(null);
+  // Bumped to remount PointSelector (clearing its internal taps) whenever
+  // we move between stages or restart after a mismatched confirmation.
+  const [selectorKey, setSelectorKey] = useState(0);
+
   const handleImageCapture = (uri) => {
     setImageUri(uri);
     setPoints(null);
+    setPendingPoints(null);
+    setPointsStage('select');
+    setSelectorKey((k) => k + 1);
     setPointsModalVisible(true); // open the point-selection modal right after picking an image
   };
 
   // Called by PointSelector's own Confirm button — only reachable once
-  // all required points are placed. This just closes the modal and
-  // stores the points locally; it does NOT touch the database.
+  // all required points are placed for the current stage.
   const handlePointsSelected = (selectedPoints) => {
-    setPoints(selectedPoints);
-    setPointsModalVisible(false);
+    if (pointsStage === 'select') {
+      // First pass done — ask the user to repeat it for confirmation.
+      setPendingPoints(selectedPoints);
+      setPointsStage('confirm');
+      setSelectorKey((k) => k + 1);
+      return;
+    }
+
+    // Confirmation pass: must match the first pass (same order, same
+    // tolerance used for login) before it's accepted. This is the only
+    // place that stores `points`; it still does NOT touch the database.
+    if (pointsMatch(selectedPoints, pendingPoints, toleranceRadius)) {
+      setPoints(selectedPoints);
+      setPointsModalVisible(false);
+    } else {
+      Alert.alert(
+        'Τα σημεία δεν ταιριάζουν',
+        'Η επιβεβαίωση δεν ταίριαξε με την πρώτη επιλογή. Παρακαλώ επιλέξτε ξανά.'
+      );
+      setPendingPoints(null);
+      setPointsStage('select');
+      setSelectorKey((k) => k + 1);
+    }
   };
 
   // Cancel button in the modal header — closes without saving.
   // Any previously confirmed points (if the user was re-selecting) are left untouched.
   const handleCancelPoints = () => {
     setPointsModalVisible(false);
+    setPendingPoints(null);
+    setPointsStage('select');
+  };
+
+  // Opens the point-selection modal fresh, always starting at the
+  // 'select' stage (covers both first-time selection and "Αλλαγή σημείων"
+  // re-selection of already-confirmed points).
+  const openPointsModal = () => {
+    setPendingPoints(null);
+    setPointsStage('select');
+    setSelectorKey((k) => k + 1);
+    setPointsModalVisible(true);
   };
 
   // The only place that actually writes to the database.
@@ -83,13 +132,13 @@ export default function RegisterScreen({ navigation }) {
             />
 
             {imageUri && !points && !loading && (
-              <TouchableOpacity onPress={() => setPointsModalVisible(true)} style={styles.secondaryButton}>
+              <TouchableOpacity onPress={openPointsModal} style={styles.secondaryButton}>
                 <Text style={styles.secondaryButtonText}>Επιλογή σημείων</Text>
               </TouchableOpacity>
             )}
 
             {imageUri && points && !loading && (
-              <TouchableOpacity onPress={() => setPointsModalVisible(true)} style={styles.secondaryButton}>
+              <TouchableOpacity onPress={openPointsModal} style={styles.secondaryButton}>
                 <Text style={styles.secondaryButtonText}>Αλλαγή σημείων</Text>
               </TouchableOpacity>
             )}
@@ -126,7 +175,13 @@ export default function RegisterScreen({ navigation }) {
             <View style={styles.modalBody}>
               {imageUri && (
                 <PointSelector
+                  key={selectorKey}
                   imageUri={imageUri}
+                  title={
+                    pointsStage === 'confirm'
+                      ? 'Επιβεβαίωσε επιλέγοντας ξανά τα ίδια σημεία'
+                      : undefined
+                  }
                   onComplete={handlePointsSelected}
                   onCancel={handleCancelPoints}
                 />

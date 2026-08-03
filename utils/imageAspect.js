@@ -2,6 +2,32 @@ import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import settings from '../config/settings.json';
 
 /**
+ * Reads an image's real, EXIF-corrected width/height (same probe technique
+ * as cropToStandardAspectRatio below — Image.getSize() can report the raw,
+ * pre-rotation sensor dimensions for some photos).
+ */
+export async function getImageDimensions(uri) {
+  const probeContext = ImageManipulator.manipulate(uri);
+  const probeRendered = await probeContext.renderAsync();
+  const { width, height } = probeRendered;
+  probeContext.release();
+  probeRendered.release();
+  return { width, height };
+}
+
+/**
+ * Registration images must be portrait: cropToStandardAspectRatio crops a
+ * landscape photo towards a 16:9-family ratio, and a 16:9 tap-image isn't
+ * the shape wanted for this app's point-selection surface.
+ * Returns true for any landscape-orientation image (width > height) — i.e.
+ * anything that would end up cropped towards 16:9.
+ */
+export async function isLandscapeImage(uri) {
+  const { width, height } = await getImageDimensions(uri);
+  return width > height;
+}
+
+/**
  * Center-crops an image to a standard aspect ratio, so every user's
  * point-selection image ends up the same shape (keeps the visible area,
  * and therefore the tap-target density, consistent across registrations).

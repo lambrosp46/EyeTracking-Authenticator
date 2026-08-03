@@ -39,6 +39,9 @@ const DOT_SIZE = cmToPoints(settings.pointSelector.dotDiameterCm);
  *                                                  Defaults to settings.json -> pointSelector.showSelectedPoints.
  *                                                  Useful to set to false during login/verification,
  *                                                  so a shoulder-surfer can't see the pattern being entered.
+ *   - title?: string                            -> overrides the leading instructions text (before the
+ *                                                  "(x/maxPoints)" counter). Defaults to "Επίλεξε N σημεία στην εικόνα".
+ *                                                  Only used when showInstructions is true.
  *   - showInstructions?: boolean                -> whether to show the "Επίλεξε N σημεία..." title. Defaults to true.
  *   - showCounter?: boolean                     -> if showInstructions is false, whether to show a plain
  *                                                  "x/maxPoints" counter in the same spot instead. Defaults to false.
@@ -57,6 +60,7 @@ export default function PointSelector({
   onCancel,
   maxPoints = settings.pointSelector.maxPoints,
   showMarkers = settings.pointSelector.showSelectedPoints,
+  title,
   showInstructions = true,
   showCounter = false,
   showUndo = true,
@@ -129,7 +133,7 @@ export default function PointSelector({
     <View style={styles.container}>
       {showInstructions && (
         <Text style={styles.title}>
-          Επίλεξε {maxPoints} σημεία στην εικόνα ({points.length}/{maxPoints})
+          {title ?? `Επίλεξε ${maxPoints} σημεία στην εικόνα`} ({points.length}/{maxPoints})
         </Text>
       )}
       {!showInstructions && showCounter && (

@@ -4,12 +4,20 @@ import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
 import PointSelector from '../components/PointSelector';
 import settings from '../config/settings.json';
 import { cropToStandardAspectRatio } from '../utils/imageAspect';
+import { pointsMatch } from '../utils/points';
 
-const { toleranceRadius } = settings.authentication;
+const { toleranceRadius, maxAttempts } = settings.authentication;
 
 export default function AuthPointsScreen({ route, navigation }) {
   const { username, imageUri, storedPoints } = route.params;
   const [displayUri, setDisplayUri] = useState(null);
+  const [attempts, setAttempts] = useState(0);
+  // Bumped after every failed attempt to remount PointSelector, which clears
+  // its internal `points` state. Without this, PointSelector's handlePress
+  // permanently blocks further taps once maxPoints is reached (autoSubmit
+  // mode has no Undo/Reset/Confirm buttons here), so a wrong attempt would
+  // otherwise leave the user stuck with no way to retry except Cancel.
+  const [selectorKey, setSelectorKey] = useState(0);
 
   // Re-crop the stored image to the standard 16:9-family aspect ratio before
   // showing it, so it lines up with the coordinate space the points were
@@ -30,22 +38,32 @@ export default function AuthPointsScreen({ route, navigation }) {
       (a, b) => a.point_index - b.point_index
     );
 
-    const matches =
-      attemptPoints.length === sortedStored.length &&
-      attemptPoints.every((point, index) => {
-        const expected = sortedStored[index];
-        const dx = point.x - expected.x;
-        const dy = point.y - expected.y;
-        return Math.sqrt(dx * dx + dy * dy) <= toleranceRadius;
-      });
+    const matches = pointsMatch(attemptPoints, sortedStored, toleranceRadius);
 
     if (matches) {
       Alert.alert('Login Successful', `Welcome, ${username}!`, [
         { text: 'OK', onPress: () => navigation.navigate('Home') },
       ]);
-    } else {
-      Alert.alert('Login Failed', 'The selected points did not match.');
+      return;
     }
+
+    const nextAttempts = attempts + 1;
+    setAttempts(nextAttempts);
+
+    if (nextAttempts >= maxAttempts) {
+      Alert.alert(
+        'Login Failed',
+        'Too many failed attempts. Please try again from the start.',
+        [{ text: 'OK', onPress: () => navigation.navigate('Home') }]
+      );
+      return;
+    }
+
+    Alert.alert(
+      'Login Failed',
+      `The selected points did not match. Attempt ${nextAttempts}/${maxAttempts}.`,
+      [{ text: 'OK', onPress: () => setSelectorKey((k) => k + 1) }]
+    );
   };
 
   const handleCalibrate = () => {
@@ -61,6 +79,7 @@ export default function AuthPointsScreen({ route, navigation }) {
       <SafeAreaView style={styles.container}>
         {displayUri ? (
           <PointSelector
+            key={selectorKey}
             imageUri={displayUri}
             maxPoints={storedPoints.length}
             showMarkers={settings.pointSelector.showSelectedPoints}
