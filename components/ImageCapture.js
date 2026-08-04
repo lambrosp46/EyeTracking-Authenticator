@@ -7,10 +7,10 @@ import {
   StyleSheet,
   ActionSheetIOS,
   Alert,
-  Platform,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
+import { presentNineSixteenCamera } from '../modules/nine-sixteen-camera';
 import { cropToStandardAspectRatio, isLandscapeImage } from '../utils/imageAspect';
 
 /**
@@ -35,6 +35,7 @@ export default function ImageCapture({
   imageUri: externalUri,
   label = 'Select image',
   showPreview = true,
+  targetAspect = '9:16',
 }) {
   const [imageUri, setImageUri] = useState(externalUri ?? null);
   const [busy, setBusy] = useState(false);
@@ -57,27 +58,24 @@ export default function ImageCapture({
       return;
     }
 
-    const croppedUri = await cropToStandardAspectRatio(uri);
+    const croppedUri = await cropToStandardAspectRatio(uri, targetAspect);
     setImageUri(croppedUri);
     onImageCapture?.(croppedUri);
   };
 
   const openCamera = async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Camera permission needed', 'Please allow camera access in Settings.');
-      return;
-    }
     setBusy(true);
     try {
-      const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ['images'],
-        quality: 0.9,
-        allowsEditing: false,
-      });
-      if (!result.canceled) {
-        await handleResult(result.assets[0].uri);
+      const result = await presentNineSixteenCamera();
+      if (result) {
+        // Already center-cropped to 9:16 natively; handleResult's own
+        // crop step becomes a no-op here but is left in place so the
+        // pipeline stays identical regardless of capture source.
+        await handleResult(result.uri);
       }
+    } catch (error) {
+      console.warn('ImageCapture: camera capture failed', error);
+      Alert.alert('Camera error', 'Could not capture a photo. Please try again.');
     } finally {
       setBusy(false);
     }
@@ -121,27 +119,17 @@ export default function ImageCapture({
   };
 
   const presentPicker = () => {
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          options: ['Cancel', 'Take Photo', 'Choose from Library', 'Choose File'],
-          cancelButtonIndex: 0,
-        },
-        (buttonIndex) => {
-          if (buttonIndex === 1) openCamera();
-          else if (buttonIndex === 2) openLibrary();
-          else if (buttonIndex === 3) openFiles();
-        }
-      );
-    } else {
-      // Android / web fallback — ActionSheetIOS doesn't exist there.
-      Alert.alert('Select image', undefined, [
-        { text: 'Take Photo', onPress: openCamera },
-        { text: 'Choose from Library', onPress: openLibrary },
-        { text: 'Choose File', onPress: openFiles },
-        { text: 'Cancel', style: 'cancel' },
-      ]);
-    }
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        options: ['Cancel', 'Take Photo', 'Choose from Library', 'Choose File'],
+        cancelButtonIndex: 0,
+      },
+      (buttonIndex) => {
+        if (buttonIndex === 1) openCamera();
+        else if (buttonIndex === 2) openLibrary();
+        else if (buttonIndex === 3) openFiles();
+      }
+    );
   };
 
   return (

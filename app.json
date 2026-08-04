@@ -14,6 +14,9 @@
     },
     "ios": {
       "supportsTablet": true,
+      "infoPlist": {
+       "NSCameraUsageDescription": "Χρειαζόμαστε πρόσβαση στην κάμερα για την καταχώρηση της εικόνας."
+     },
       "bundleIdentifier": "com.anonymous.EyeTrackingAuthenticator"
     },
     "android": {

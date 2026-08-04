@@ -9,6 +9,7 @@ import {
   StyleSheet,
   Alert,
   ActivityIndicator,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
 import { useAuth } from '../hooks/useAuth';
@@ -44,38 +45,44 @@ export default function LoginScreen({ navigation }) {
   return (
     <SafeAreaProvider>
       <SafeAreaView style={styles.container}>
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={true}>
-          <View style={styles.header}>
-            <Image source={require('../assets/logo-pan-patron.gif')} style={styles.logo} />
-            <Text style={styles.loginTitle}>Τμήμα Μηχανικών Η/Υ & Πληροφορικής</Text>
-          </View>
+        <KeyboardAvoidingView style={styles.flex} behavior="padding">
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={true}
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={styles.header}>
+              <Image source={require('../assets/logo-pan-patron.gif')} style={styles.logo} />
+              <Text style={styles.loginTitle}>Τμήμα Μηχανικών Η/Υ & Πληροφορικής</Text>
+            </View>
 
-          <View style={styles.inputContainer}>
-            <Text style={styles.loginText}>Username</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Πληκτρολογήστε username"
-              placeholderTextColor="#6b7280"
-              returnKeyType="done"
-              value={username}
-              onChangeText={setUsername}
-              autoCapitalize="none"
-              autoCorrect={false}
-              editable={!loading}
-            />
+            <View style={styles.inputContainer}>
+              <Text style={styles.loginText}>Username</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Πληκτρολογήστε username"
+                placeholderTextColor="#6b7280"
+                returnKeyType="done"
+                value={username}
+                onChangeText={setUsername}
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!loading}
+              />
 
-            {loading ? (
-              <View style={styles.loadingRow}>
-                <ActivityIndicator />
-                <Text style={styles.loadingText}>Συνδέεση…</Text>
-              </View>
-            ) : (
-              <TouchableOpacity style={styles.loginButton} onPress={handleLogin}>
-                <Text style={styles.loginButtonText}>Login</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        </ScrollView>
+              {loading ? (
+                <View style={styles.loadingRow}>
+                  <ActivityIndicator />
+                  <Text style={styles.loadingText}>Συνδέεση…</Text>
+                </View>
+              ) : (
+                <TouchableOpacity style={styles.loginButton} onPress={handleLogin}>
+                  <Text style={styles.loginButtonText}>Login</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </SafeAreaView>
     </SafeAreaProvider>
   );
@@ -86,20 +93,24 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f9fafb',
   },
+  flex: {
+    flex: 1,
+  },
   scrollContent: {
     flexGrow: 1,
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     paddingHorizontal: 20,
-    paddingVertical: 20,
+    paddingTop: 40,
+    paddingBottom: 20,
   },
   header: {
     alignItems: 'center',
-    marginBottom: 32,
+    marginBottom: 24,
   },
   logo: {
-    width: 110,
-    height: 110,
-    marginBottom: 16,
+    width: 90,
+    height: 90,
+    marginBottom: 12,
   },
   loginTitle: {
     fontSize: 22,

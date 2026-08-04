@@ -1,0 +1,10 @@
+{
+  "name": "nine-sixteen-camera",
+  "version": "1.0.0",
+  "description": "Custom AVFoundation camera capture locked to a 9:16 framing guide",
+  "main": "index.ts",
+  "types": "index.ts",
+  "peerDependencies": {
+    "expo": "*"
+  }
+}
