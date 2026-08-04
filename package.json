@@ -23,5 +23,9 @@
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0"
   },
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "@types/react": "^19.2.18",
+    "typescript": "^7.0.2"
+  }
 }

@@ -1,0 +1,11 @@
+{
+  "name": "expo-saliency",
+  "version": "1.0.0",
+  "description": "Local Expo module wrapping Vision's VNGenerateAttentionBasedSaliencyImageRequest, used to gate registration gaze-points to high-saliency image regions.",
+  "main": "index.ts",
+  "types": "index.ts",
+  "license": "UNLICENSED",
+  "peerDependencies": {
+    "expo": "*"
+  }
+}

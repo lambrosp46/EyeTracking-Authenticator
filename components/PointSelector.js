@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import settings from '../config/settings.json';
 import { cmToPoints } from '../utils/physicalSize';
+import { isHighSaliency, sampleSaliency } from '../utils/saliency';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const COVERAGE = settings.pointSelector.screenCoverage;
@@ -50,6 +51,16 @@ const DOT_SIZE = cmToPoints(settings.pointSelector.dotDiameterCm);
  *   - showConfirmButton?: boolean               -> whether to render the Confirm button. Defaults to true.
  *   - autoSubmit?: boolean                      -> if true, calls onComplete automatically once maxPoints
  *                                                  are picked, without waiting for a Confirm tap. Defaults to false.
+ *   - saliencyMap?: SaliencyMap                 -> optional saliency heatmap (see utils/saliency.js). If provided,
+ *                                                  caps how many of the (up to maxPoints) taps may land on a
+ *                                                  high-saliency region — see saliencyMaxHighCount. If omitted/null,
+ *                                                  no gating happens regardless of saliencyMaxHighCount.
+ *   - saliencyMaxHighCount?: number             -> the maximum number of taps (out of all maxPoints, in any
+ *                                                  order) allowed to land on a high-saliency region. Low-saliency
+ *                                                  taps are never limited. Defaults to 0 (no high-saliency taps
+ *                                                  allowed at all, when saliencyMap is provided).
+ *   - saliencyMinScore?: number                 -> the [0, 1] threshold a tap's saliency score must meet to
+ *                                                  count as "high". Defaults to settings.json -> saliency.minScore.
  *
  * If none of onCancel / showUndo / showReset / showConfirmButton apply, the
  * whole bottom action row is omitted, so the image gets that space too.
@@ -67,10 +78,14 @@ export default function PointSelector({
   showReset = true,
   showConfirmButton = true,
   autoSubmit = false,
+  saliencyMap = null,
+  saliencyMaxHighCount = 0,
+  saliencyMinScore = settings.saliency.minScore,
 }) {
   const [points, setPoints] = useState([]);
   const [boxSize, setBoxSize] = useState({ width: BOX_WIDTH, height: BOX_WIDTH });
   const [layout, setLayout] = useState({ width: BOX_WIDTH, height: BOX_WIDTH });
+  const [saliencyWarning, setSaliencyWarning] = useState(false);
 
   const showCancel = !!onCancel;
   const showActionsRow = showCancel || showUndo || showReset || showConfirmButton;
@@ -116,6 +131,35 @@ export default function PointSelector({
     const x = Math.min(Math.max(locationX / layout.width, 0), 1);
     const y = Math.min(Math.max(locationY / layout.height, 0), 1);
 
+    // At most `saliencyMaxHighCount` of the (up to maxPoints) taps, in any
+    // order, may land on a high-saliency region of the image (per the
+    // saliency map computed at image-upload time). Low-saliency taps are
+    // never limited. A tap that would exceed the cap is rejected outright
+    // — it's not added to `points` — and the user sees an inline warning
+    // instead, asking them to pick a less visually-obvious point.
+    if (saliencyMap) {
+      const score = sampleSaliency(saliencyMap, x, y);
+      const tapIsHighSaliency = score >= saliencyMinScore;
+      if (tapIsHighSaliency) {
+        const highSoFar = points.filter((p) =>
+          isHighSaliency(saliencyMap, p.x, p.y, saliencyMinScore)
+        ).length;
+        const rejected = highSoFar >= saliencyMaxHighCount;
+        console.log(
+          `[PointSelector] tap ${points.length + 1}: (${x.toFixed(3)}, ${y.toFixed(3)}) score=${score.toFixed(3)} high=true highSoFar=${highSoFar}/${saliencyMaxHighCount} -> ${rejected ? 'REJECTED (cap reached)' : 'accepted'}`
+        );
+        if (rejected) {
+          setSaliencyWarning(true);
+          return;
+        }
+      } else {
+        console.log(
+          `[PointSelector] tap ${points.length + 1}: (${x.toFixed(3)}, ${y.toFixed(3)}) score=${score.toFixed(3)} high=false -> accepted`
+        );
+      }
+    }
+    setSaliencyWarning(false);
+
     const newPoints = [...points, { x, y }];
     setPoints(newPoints);
 
@@ -124,8 +168,14 @@ export default function PointSelector({
     }
   };
 
-  const undoLast = () => setPoints((prev) => prev.slice(0, -1));
-  const reset = () => setPoints([]);
+  const undoLast = () => {
+    setSaliencyWarning(false);
+    setPoints((prev) => prev.slice(0, -1));
+  };
+  const reset = () => {
+    setSaliencyWarning(false);
+    setPoints([]);
+  };
 
   const isComplete = points.length === maxPoints;
 
@@ -134,11 +184,19 @@ export default function PointSelector({
       {showInstructions && (
         <Text style={styles.title}>
           {title ?? `Επίλεξε ${maxPoints} σημεία στην εικόνα`} ({points.length}/{maxPoints})
+          {saliencyMap && saliencyMaxHighCount > 0
+            ? `\nΈως ${saliencyMaxHighCount} από τα σημεία μπορούν να είναι σε περιοχές με υψηλή οπτική προσοχή.`
+            : ''}
         </Text>
       )}
       {!showInstructions && showCounter && (
         <Text style={styles.title}>
           {points.length}/{maxPoints}
+        </Text>
+      )}
+      {saliencyWarning && (
+        <Text style={styles.saliencyWarning}>
+          Έχεις ήδη επιλέξει το μέγιστο ({saliencyMaxHighCount}) σημείων υψηλής οπτικής προσοχής. Δοκίμασε ένα λιγότερο χαρακτηριστικό σημείο της εικόνας.
         </Text>
       )}
 
@@ -227,6 +285,14 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginBottom: 12,
     textAlign: 'center',
+    paddingHorizontal: 16,
+  },
+  saliencyWarning: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#dc2626',
+    textAlign: 'center',
+    marginBottom: 10,
     paddingHorizontal: 16,
   },
   imageWrapper: {

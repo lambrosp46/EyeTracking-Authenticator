@@ -1,0 +1,118 @@
+[ExpoModulesJSI] Detected: prebuilt RN (RN_ROOT=/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/node_modules/react-native)
+[ExpoModulesJSI] Clearing stale build state (DerivedData, SwiftPM) before rebuild
+[ExpoModulesJSI] Building framework slice for iphonesimulator...
+2026-08-03 17:44:31.492 xcodebuild[28560:765815] [MT] IDERunDestination: Supported platforms for the buildables in the current scheme is empty.
+/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/node_modules/expo-modules-jsi/apple/Sources/ExpoModulesJSI-Cxx/include/IRuntimeCompat.h:4:10: note: while building module 'jsi' imported from /Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/node_modules/expo-modules-jsi/apple/Sources/ExpoModulesJSI-Cxx/include/IRuntimeCompat.h:4:
+#include <jsi/jsi.h>
+         ^
+<module-includes>:1:9: note: in file included from <module-includes>:1:
+#import "/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/ios/Pods/Headers/Public/React-jsi/jsi/jsi.h"
+        ^
+/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/ios/Pods/Headers/Public/React-jsi/jsi/jsi.h:2267:1: warning: umbrella header for module 'jsi' does not include header 'JSIDynamic.h'
+
+^
+/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/node_modules/expo-modules-jsi/apple/Sources/ExpoModulesJSI-Cxx/include/IRuntimeCompat.h:4:10: note: while building module 'jsi' imported from /Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/node_modules/expo-modules-jsi/apple/Sources/ExpoModulesJSI-Cxx/include/IRuntimeCompat.h:4:
+#include <jsi/jsi.h>
+         ^
+<module-includes>:1:9: note: in file included from <module-includes>:1:
+#import "/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/ios/Pods/Headers/Public/React-jsi/jsi/jsi.h"
+        ^
+/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/ios/Pods/Headers/Public/React-jsi/jsi/jsi.h:2267:1: warning: umbrella header for module 'jsi' does not include header 'hermes-interfaces.h'
+
+^
+/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/node_modules/expo-modules-jsi/apple/Sources/ExpoModulesJSI-Cxx/include/IRuntimeCompat.h:4:10: note: while building module 'jsi' imported from /Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/node_modules/expo-modules-jsi/apple/Sources/ExpoModulesJSI-Cxx/include/IRuntimeCompat.h:4:
+#include <jsi/jsi.h>
+         ^
+<module-includes>:1:9: note: in file included from <module-includes>:1:
+#import "/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/ios/Pods/Headers/Public/React-jsi/jsi/jsi.h"
+        ^
+/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/ios/Pods/Headers/Public/React-jsi/jsi/jsi.h:2267:1: warning: umbrella header for module 'jsi' does not include header 'instrumentation.h'
+
+^
+/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/node_modules/expo-modules-jsi/apple/Sources/ExpoModulesJSI-Cxx/include/IRuntimeCompat.h:4:10: note: while building module 'jsi' imported from /Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/node_modules/expo-modules-jsi/apple/Sources/ExpoModulesJSI-Cxx/include/IRuntimeCompat.h:4:
+#include <jsi/jsi.h>
+         ^
+<module-includes>:1:9: note: in file included from <module-includes>:1:
+#import "/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/ios/Pods/Headers/Public/React-jsi/jsi/jsi.h"
+        ^
+/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/ios/Pods/Headers/Public/React-jsi/jsi/jsi.h:2267:1: warning: umbrella header for module 'jsi' does not include header 'decorator.h'
+
+^
+/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/node_modules/expo-modules-jsi/apple/Sources/ExpoModulesJSI-Cxx/include/IRuntimeCompat.h:4:10: note: while building module 'jsi' imported from /Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/node_modules/expo-modules-jsi/apple/Sources/ExpoModulesJSI-Cxx/include/IRuntimeCompat.h:4:
+#include <jsi/jsi.h>
+         ^
+<module-includes>:1:9: note: in file included from <module-includes>:1:
+#import "/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/ios/Pods/Headers/Public/React-jsi/jsi/jsi.h"
+        ^
+/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/ios/Pods/Headers/Public/React-jsi/jsi/jsi.h:2267:1: warning: umbrella header for module 'jsi' does not include header 'threadsafe.h'
+
+^
+/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/node_modules/expo-modules-jsi/apple/Sources/ExpoModulesJSI-Cxx/include/IRuntimeCompat.h:4:10: note: while building module 'jsi' imported from /Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/node_modules/expo-modules-jsi/apple/Sources/ExpoModulesJSI-Cxx/include/IRuntimeCompat.h:4:
+#include <jsi/jsi.h>
+         ^
+<module-includes>:1:9: note: in file included from <module-includes>:1:
+#import "/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/ios/Pods/Headers/Public/React-jsi/jsi/jsi.h"
+        ^
+/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/ios/Pods/Headers/Public/React-jsi/jsi/jsi.h:2267:1: warning: umbrella header for module 'jsi' does not include header 'jsilib.h'
+
+^
+/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/node_modules/expo-modules-jsi/apple/Sources/ExpoModulesJSI-Cxx/include/IRuntimeCompat.h:4:10: note: while building module 'jsi' imported from /Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/node_modules/expo-modules-jsi/apple/Sources/ExpoModulesJSI-Cxx/include/IRuntimeCompat.h:4:
+#include <jsi/jsi.h>
+         ^
+<module-includes>:1:9: note: in file included from <module-includes>:1:
+#import "/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/ios/Pods/Headers/Public/React-jsi/jsi/jsi.h"
+        ^
+/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/ios/Pods/Headers/Public/React-jsi/jsi/jsi.h:2267:1: warning: umbrella header for module 'jsi' does not include header 'JSIDynamic.h'
+
+^
+/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/node_modules/expo-modules-jsi/apple/Sources/ExpoModulesJSI-Cxx/include/IRuntimeCompat.h:4:10: note: while building module 'jsi' imported from /Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/node_modules/expo-modules-jsi/apple/Sources/ExpoModulesJSI-Cxx/include/IRuntimeCompat.h:4:
+#include <jsi/jsi.h>
+         ^
+<module-includes>:1:9: note: in file included from <module-includes>:1:
+#import "/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/ios/Pods/Headers/Public/React-jsi/jsi/jsi.h"
+        ^
+/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/ios/Pods/Headers/Public/React-jsi/jsi/jsi.h:2267:1: warning: umbrella header for module 'jsi' does not include header 'hermes-interfaces.h'
+
+^
+/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/node_modules/expo-modules-jsi/apple/Sources/ExpoModulesJSI-Cxx/include/IRuntimeCompat.h:4:10: note: while building module 'jsi' imported from /Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/node_modules/expo-modules-jsi/apple/Sources/ExpoModulesJSI-Cxx/include/IRuntimeCompat.h:4:
+#include <jsi/jsi.h>
+         ^
+<module-includes>:1:9: note: in file included from <module-includes>:1:
+#import "/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/ios/Pods/Headers/Public/React-jsi/jsi/jsi.h"
+        ^
+/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/ios/Pods/Headers/Public/React-jsi/jsi/jsi.h:2267:1: warning: umbrella header for module 'jsi' does not include header 'instrumentation.h'
+
+^
+/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/node_modules/expo-modules-jsi/apple/Sources/ExpoModulesJSI-Cxx/include/IRuntimeCompat.h:4:10: note: while building module 'jsi' imported from /Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/node_modules/expo-modules-jsi/apple/Sources/ExpoModulesJSI-Cxx/include/IRuntimeCompat.h:4:
+#include <jsi/jsi.h>
+         ^
+<module-includes>:1:9: note: in file included from <module-includes>:1:
+#import "/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/ios/Pods/Headers/Public/React-jsi/jsi/jsi.h"
+        ^
+/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/ios/Pods/Headers/Public/React-jsi/jsi/jsi.h:2267:1: warning: umbrella header for module 'jsi' does not include header 'decorator.h'
+
+^
+/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/node_modules/expo-modules-jsi/apple/Sources/ExpoModulesJSI-Cxx/include/IRuntimeCompat.h:4:10: note: while building module 'jsi' imported from /Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/node_modules/expo-modules-jsi/apple/Sources/ExpoModulesJSI-Cxx/include/IRuntimeCompat.h:4:
+#include <jsi/jsi.h>
+         ^
+<module-includes>:1:9: note: in file included from <module-includes>:1:
+#import "/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/ios/Pods/Headers/Public/React-jsi/jsi/jsi.h"
+        ^
+/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/ios/Pods/Headers/Public/React-jsi/jsi/jsi.h:2267:1: warning: umbrella header for module 'jsi' does not include header 'threadsafe.h'
+
+^
+/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/node_modules/expo-modules-jsi/apple/Sources/ExpoModulesJSI-Cxx/include/IRuntimeCompat.h:4:10: note: while building module 'jsi' imported from /Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/node_modules/expo-modules-jsi/apple/Sources/ExpoModulesJSI-Cxx/include/IRuntimeCompat.h:4:
+#include <jsi/jsi.h>
+         ^
+<module-includes>:1:9: note: in file included from <module-includes>:1:
+#import "/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/ios/Pods/Headers/Public/React-jsi/jsi/jsi.h"
+        ^
+/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/ios/Pods/Headers/Public/React-jsi/jsi/jsi.h:2267:1: warning: umbrella header for module 'jsi' does not include header 'jsilib.h'
+
+^
+/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/node_modules/expo-modules-jsi/apple/Package.swift: ExpoModulesJSI: ld: warning: -undefined dynamic_lookup is deprecated on iOS-simulator
+/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/node_modules/expo-modules-jsi/apple/Package.swift: ExpoModulesJSI: ld: warning: -undefined dynamic_lookup is deprecated on iOS-simulator
+/Users/lambrosp/Documents/Thesis/EyeTracking-Authenticator/node_modules/expo-modules-jsi/apple/.DerivedData/Build/Products/Release-iphonesimulator/PackageFrameworks/ExpoModulesJSI.framework: resource fork, Finder information, or similar detritus not allowed
+Command CodeSign failed with a nonzero exit code
+** BUILD FAILED **
+

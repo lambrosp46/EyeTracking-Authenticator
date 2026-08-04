@@ -6,8 +6,10 @@ import ImageCapture from '../components/ImageCapture';
 import PointSelector from '../components/PointSelector';
 import settings from '../config/settings.json';
 import { pointsMatch } from '../utils/points';
+import { getSaliencyMap, logSaliencyMapStats } from '../utils/saliency';
 
 const { toleranceRadius } = settings.authentication;
+const { minScore: saliencyMinScore, maxHighSaliencyPoints } = settings.saliency;
 
 export default function RegisterScreen({ navigation }) {
   const { register, loading } = useAuth();
@@ -15,6 +17,14 @@ export default function RegisterScreen({ navigation }) {
   const [imageUri, setImageUri] = useState(null);
   const [points, setPoints] = useState(null);
   const [pointsModalVisible, setPointsModalVisible] = useState(false);
+  // Saliency map (Vision's VNGenerateAttentionBasedSaliencyImageRequest) for
+  // the currently-uploaded image, computed once right after upload. Caps
+  // how many of the 5 points (in any order) may land on a high-saliency
+  // region — see PointSelector's saliencyMaxHighCount. Left null if the
+  // native call fails (e.g. non-iOS) so registration still works, just
+  // without the cap.
+  const [saliencyMap, setSaliencyMap] = useState(null);
+  const [saliencyLoading, setSaliencyLoading] = useState(false);
 
   // Registration requires the user to pick their points twice, like a
   // password-confirmation field, so a mis-tap on the only pass doesn't
@@ -26,13 +36,31 @@ export default function RegisterScreen({ navigation }) {
   // we move between stages or restart after a mismatched confirmation.
   const [selectorKey, setSelectorKey] = useState(0);
 
-  const handleImageCapture = (uri) => {
+  // Runs saliency analysis (Vision) right after the image is uploaded, then
+  // opens the point-selection modal — with the saliency map ready in time
+  // to cap high-saliency taps in PointSelector. If Vision fails (or isn't
+  // available, e.g. Android/web), registration still proceeds, just
+  // without the cap.
+  const handleImageCapture = async (uri) => {
     setImageUri(uri);
     setPoints(null);
     setPendingPoints(null);
     setPointsStage('select');
     setSelectorKey((k) => k + 1);
-    setPointsModalVisible(true); // open the point-selection modal right after picking an image
+    setSaliencyMap(null);
+
+    setSaliencyLoading(true);
+    try {
+      const map = await getSaliencyMap(uri);
+      logSaliencyMapStats(map, 'RegisterScreen');
+      setSaliencyMap(map);
+    } catch (err) {
+      console.warn('RegisterScreen: saliency computation failed, continuing without saliency gating', err);
+      setSaliencyMap(null);
+    } finally {
+      setSaliencyLoading(false);
+      setPointsModalVisible(true); // open the point-selection modal right after analysis
+    }
   };
 
   // Called by PointSelector's own Confirm button — only reachable once
@@ -131,7 +159,14 @@ export default function RegisterScreen({ navigation }) {
               showPreview={false}
             />
 
-            {imageUri && !points && !loading && (
+            {imageUri && saliencyLoading && (
+              <View style={styles.loadingRow}>
+                <ActivityIndicator />
+                <Text style={styles.loadingText}>Ανάλυση εικόνας…</Text>
+              </View>
+            )}
+
+            {imageUri && !saliencyLoading && !points && !loading && (
               <TouchableOpacity onPress={openPointsModal} style={styles.secondaryButton}>
                 <Text style={styles.secondaryButtonText}>Επιλογή σημείων</Text>
               </TouchableOpacity>
@@ -184,6 +219,9 @@ export default function RegisterScreen({ navigation }) {
                   }
                   onComplete={handlePointsSelected}
                   onCancel={handleCancelPoints}
+                  saliencyMap={saliencyMap}
+                  saliencyMaxHighCount={maxHighSaliencyPoints}
+                  saliencyMinScore={saliencyMinScore}
                 />
               )}
             </View>

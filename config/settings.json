@@ -17,5 +17,9 @@
   "imageProcessing": {
     "standardAspectWidth": 16,
     "standardAspectHeight": 9
+  },
+  "saliency": {
+    "minScore": 0.5,
+    "maxHighSaliencyPoints": 2
   }
 }
