@@ -79,15 +79,26 @@ export function logSaliencyMapStats(map, label = 'saliency map') {
   let min = Infinity;
   let max = -Infinity;
   let sum = 0;
+  let maxIndex = 0;
   for (let i = 0; i < values.length; i++) {
     const v = values[i];
     if (v < min) min = v;
-    if (v > max) max = v;
+    if (v > max) {
+      max = v;
+      maxIndex = i;
+    }
     sum += v;
   }
   const mean = sum / values.length;
+  // Center of the highest-scoring cell, in the same normalized { x, y }
+  // (top-left origin) units as tap points — compare this directly against
+  // where you actually tapped to sanity-check the mapping.
+  const peakRow = Math.floor(maxIndex / cols);
+  const peakCol = maxIndex % cols;
+  const peakX = (peakCol + 0.5) / cols;
+  const peakY = (peakRow + 0.5) / rows;
   console.log(
-    `[${label}] ${cols}x${rows} grid — min=${min.toFixed(3)} max=${max.toFixed(3)} mean=${mean.toFixed(3)}`
+    `[${label}] ${cols}x${rows} grid — min=${min.toFixed(3)} max=${max.toFixed(3)} mean=${mean.toFixed(3)} peak@(${peakX.toFixed(3)}, ${peakY.toFixed(3)})`
   );
   console.log(`[${label}] ascii heatmap (brighter = higher saliency):\n${saliencyMapToAscii(map)}`);
 }

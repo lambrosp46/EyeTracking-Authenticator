@@ -6,6 +6,7 @@ import {
   Pressable,
   StyleSheet,
   Dimensions,
+  Alert,
 } from 'react-native';
 import settings from '../config/settings.json';
 import { cmToPoints } from '../utils/physicalSize';
@@ -85,7 +86,6 @@ export default function PointSelector({
   const [points, setPoints] = useState([]);
   const [boxSize, setBoxSize] = useState({ width: BOX_WIDTH, height: BOX_WIDTH });
   const [layout, setLayout] = useState({ width: BOX_WIDTH, height: BOX_WIDTH });
-  const [saliencyWarning, setSaliencyWarning] = useState(false);
 
   const showCancel = !!onCancel;
   const showActionsRow = showCancel || showUndo || showReset || showConfirmButton;
@@ -135,8 +135,8 @@ export default function PointSelector({
     // order, may land on a high-saliency region of the image (per the
     // saliency map computed at image-upload time). Low-saliency taps are
     // never limited. A tap that would exceed the cap is rejected outright
-    // — it's not added to `points` — and the user sees an inline warning
-    // instead, asking them to pick a less visually-obvious point.
+    // — it's not added to `points` — and the user sees an Alert instead,
+    // asking them to pick a less visually-obvious point.
     if (saliencyMap) {
       const score = sampleSaliency(saliencyMap, x, y);
       const tapIsHighSaliency = score >= saliencyMinScore;
@@ -149,7 +149,10 @@ export default function PointSelector({
           `[PointSelector] tap ${points.length + 1}: (${x.toFixed(3)}, ${y.toFixed(3)}) score=${score.toFixed(3)} high=true highSoFar=${highSoFar}/${saliencyMaxHighCount} -> ${rejected ? 'REJECTED (cap reached)' : 'accepted'}`
         );
         if (rejected) {
-          setSaliencyWarning(true);
+          Alert.alert(
+            'Πολύ έντονο σημείο',
+            `Έχεις ήδη επιλέξει το μέγιστο (${saliencyMaxHighCount}) σημείων υψηλής οπτικής προσοχής. Δοκίμασε ένα λιγότερο χαρακτηριστικό σημείο της εικόνας.`
+          );
           return;
         }
       } else {
@@ -158,7 +161,6 @@ export default function PointSelector({
         );
       }
     }
-    setSaliencyWarning(false);
 
     const newPoints = [...points, { x, y }];
     setPoints(newPoints);
@@ -168,14 +170,8 @@ export default function PointSelector({
     }
   };
 
-  const undoLast = () => {
-    setSaliencyWarning(false);
-    setPoints((prev) => prev.slice(0, -1));
-  };
-  const reset = () => {
-    setSaliencyWarning(false);
-    setPoints([]);
-  };
+  const undoLast = () => setPoints((prev) => prev.slice(0, -1));
+  const reset = () => setPoints([]);
 
   const isComplete = points.length === maxPoints;
 
@@ -184,9 +180,6 @@ export default function PointSelector({
       {showInstructions && (
         <Text style={styles.title}>
           {title ?? `Επίλεξε ${maxPoints} σημεία στην εικόνα`} ({points.length}/{maxPoints})
-          {saliencyMap && saliencyMaxHighCount > 0
-            ? `\nΈως ${saliencyMaxHighCount} από τα σημεία μπορούν να είναι σε περιοχές με υψηλή οπτική προσοχή.`
-            : ''}
         </Text>
       )}
       {!showInstructions && showCounter && (
@@ -194,12 +187,6 @@ export default function PointSelector({
           {points.length}/{maxPoints}
         </Text>
       )}
-      {saliencyWarning && (
-        <Text style={styles.saliencyWarning}>
-          Έχεις ήδη επιλέξει το μέγιστο ({saliencyMaxHighCount}) σημείων υψηλής οπτικής προσοχής. Δοκίμασε ένα λιγότερο χαρακτηριστικό σημείο της εικόνας.
-        </Text>
-      )}
-
       <Pressable
         onPress={handlePress}
         style={[styles.imageWrapper, { width: boxSize.width, height: boxSize.height }]}
@@ -285,14 +272,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginBottom: 12,
     textAlign: 'center',
-    paddingHorizontal: 16,
-  },
-  saliencyWarning: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#dc2626',
-    textAlign: 'center',
-    marginBottom: 10,
     paddingHorizontal: 16,
   },
   imageWrapper: {

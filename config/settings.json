@@ -19,7 +19,7 @@
     "standardAspectHeight": 9
   },
   "saliency": {
-    "minScore": 0.5,
+    "minScore": 0.3,
     "maxHighSaliencyPoints": 2
   }
 }
