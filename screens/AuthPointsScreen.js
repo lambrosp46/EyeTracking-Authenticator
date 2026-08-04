@@ -42,7 +42,7 @@ export default function AuthPointsScreen({ route, navigation }) {
 
     if (matches) {
       Alert.alert('Login Successful', `Welcome, ${username}!`, [
-        { text: 'OK', onPress: () => navigation.navigate('Home') },
+        { text: 'OK', onPress: () => navigation.reset({ index: 0, routes: [{ name: 'Home' }] }) },
       ]);
       return;
     }
@@ -54,7 +54,7 @@ export default function AuthPointsScreen({ route, navigation }) {
       Alert.alert(
         'Login Failed',
         'Too many failed attempts. Please try again from the start.',
-        [{ text: 'OK', onPress: () => navigation.navigate('Home') }]
+        [{ text: 'OK', onPress: () => navigation.reset({ index: 0, routes: [{ name: 'Home' }] }) }]
       );
       return;
     }

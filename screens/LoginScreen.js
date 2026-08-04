@@ -108,9 +108,9 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   logo: {
-    width: 90,
-    height: 90,
-    marginBottom: 12,
+    width: 110,
+    height: 110,
+    marginBottom: 16,
   },
   loginTitle: {
     fontSize: 22,
