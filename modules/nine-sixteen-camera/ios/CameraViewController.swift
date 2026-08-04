@@ -60,7 +60,18 @@ final class CameraViewController: UIViewController {
   private let reviewImageView = UIImageView()
   private let retakeButton = UIButton(type: .system)
   private let useButton = UIButton(type: .system)
-  private var pendingResult: NineSixteenPhotoResult?
+
+  /// Tracks the background JPEG-encode + disk-write that runs while the
+  /// user is looking at the review screen, so "Use Photo" can return
+  /// immediately if it already finished, or wait briefly if not.
+  private enum PhotoWriteState {
+    case pending
+    case completed(NineSixteenPhotoResult)
+    case failed(Error)
+  }
+  private var writeState: PhotoWriteState = .pending
+  private var isWaitingForWrite = false
+  private let writeStateLock = NSLock()
 
   /// The guide frame's rect (in view/layer coordinates) captured at the
   /// moment the shutter is tapped, used to map screen coordinates to
@@ -405,11 +416,18 @@ final class CameraViewController: UIViewController {
   }
 
   @objc private func didTapRetake() {
-    pendingResult = nil
+    writeStateLock.lock()
+    writeState = .pending
+    isWaitingForWrite = false
+    writeStateLock.unlock()
+
     reviewImageView.image = nil
     reviewImageView.isHidden = true
     retakeButton.isHidden = true
+    retakeButton.isEnabled = true
     useButton.isHidden = true
+    useButton.isEnabled = true
+    useButton.configuration?.showsActivityIndicator = false
     shutterButton.isHidden = false
     shutterButton.isEnabled = true
     cancelButton.isHidden = false
@@ -421,8 +439,51 @@ final class CameraViewController: UIViewController {
   }
 
   @objc private func didTapUsePhoto() {
-    guard let result = pendingResult else { return }
-    finish(.success(result))
+    writeStateLock.lock()
+    let state = writeState
+    writeStateLock.unlock()
+
+    switch state {
+    case .completed(let result):
+      finish(.success(result))
+    case .failed(let error):
+      finish(.failure(error))
+    case .pending:
+      // The background encode/write hasn't finished yet — this should be
+      // rare (it usually completes while the user is still looking at
+      // the review screen). Show a brief wait state on the button;
+      // `setWriteState` will auto-finish as soon as the write completes.
+      writeStateLock.lock()
+      isWaitingForWrite = true
+      writeStateLock.unlock()
+
+      useButton.isEnabled = false
+      retakeButton.isEnabled = false
+      useButton.configuration?.showsActivityIndicator = true
+    }
+  }
+
+  /// Called from the background queue once the JPEG-encode + disk-write
+  /// finishes (success or failure). If the user already tapped "Use
+  /// Photo" and is waiting, this finishes the flow immediately.
+  private func setWriteState(_ newState: PhotoWriteState) {
+    writeStateLock.lock()
+    writeState = newState
+    let shouldAutoFinish = isWaitingForWrite
+    writeStateLock.unlock()
+
+    guard shouldAutoFinish else { return }
+
+    DispatchQueue.main.async { [weak self] in
+      switch newState {
+      case .completed(let result):
+        self?.finish(.success(result))
+      case .failed(let error):
+        self?.finish(.failure(error))
+      case .pending:
+        break
+      }
+    }
   }
 
   private func finish(_ outcome: NineSixteenCaptureOutcome) {
@@ -524,8 +585,7 @@ extension CameraViewController: AVCapturePhotoCaptureDelegate {
     guard
       let data = photo.fileDataRepresentation(),
       let rawImage = UIImage(data: data),
-      let cropped = cropToGuideFrame(rawImage),
-      let jpegData = cropped.jpegData(compressionQuality: 0.9)
+      let cropped = cropToGuideFrame(rawImage)
     else {
       DispatchQueue.main.async {
         self.processingIndicator.stopAnimating()
@@ -535,31 +595,20 @@ extension CameraViewController: AVCapturePhotoCaptureDelegate {
       return
     }
 
-    let fileName = "nine-sixteen-\(UUID().uuidString).jpg"
-    let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
-
-    do {
-      try jpegData.write(to: fileURL)
-    } catch {
-      DispatchQueue.main.async {
-        self.processingIndicator.stopAnimating()
-        self.shutterButton.isEnabled = true
-      }
-      finish(.failure(error))
-      return
-    }
-
     sessionQueue.async { [weak self] in self?.session.stopRunning() }
 
+    writeStateLock.lock()
+    writeState = .pending
+    isWaitingForWrite = false
+    writeStateLock.unlock()
+
+    // Show the review screen right away with the in-memory cropped
+    // image — no need to wait for JPEG encoding or the disk write,
+    // since those are only needed once the user actually confirms.
     DispatchQueue.main.async { [weak self] in
       guard let self = self else { return }
       self.processingIndicator.stopAnimating()
       self.shutterButton.isEnabled = true
-      self.pendingResult = NineSixteenPhotoResult(
-        fileURL: fileURL,
-        width: cropped.cgImage?.width ?? Int(cropped.size.width),
-        height: cropped.cgImage?.height ?? Int(cropped.size.height)
-      )
       self.reviewImageView.image = cropped
       self.reviewImageView.isHidden = false
       self.retakeButton.isHidden = false
@@ -570,6 +619,33 @@ extension CameraViewController: AVCapturePhotoCaptureDelegate {
       self.dimOverlayView.isHidden = true
       self.guideFrameView.isHidden = true
       self.hintLabel.isHidden = true
+    }
+
+    // Encode + write to disk in the background while the user looks at
+    // the review screen — this almost always finishes well before they
+    // tap "Use Photo", so it feels instant even though real work (JPEG
+    // encode, disk I/O) is still happening.
+    DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+      guard let self = self else { return }
+      guard let jpegData = cropped.jpegData(compressionQuality: 0.9) else {
+        self.setWriteState(.failed(NineSixteenCameraError.cropFailed))
+        return
+      }
+
+      let fileName = "nine-sixteen-\(UUID().uuidString).jpg"
+      let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+
+      do {
+        try jpegData.write(to: fileURL)
+        let result = NineSixteenPhotoResult(
+          fileURL: fileURL,
+          width: cropped.cgImage?.width ?? Int(cropped.size.width),
+          height: cropped.cgImage?.height ?? Int(cropped.size.height)
+        )
+        self.setWriteState(.completed(result))
+      } catch {
+        self.setWriteState(.failed(error))
+      }
     }
   }
 }
