@@ -79,7 +79,6 @@
 
   "gazeCircle": {
     "enabled": true,
-    "diameterCm": 1.5,
     "color": "rgba(10,132,255,0.30)",
     "borderColor": "#0A84FF",
     "borderWidth": 2,

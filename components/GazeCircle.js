@@ -18,7 +18,7 @@ import { cmToPoints } from '../utils/gazeMapping';
 export default function GazeCircle({
   position,
   visibility,
-  diameterCm = settings.gazeCircle.diameterCm,
+  diameterCm = settings.pointSelector.dotDiameterCm,
   color = settings.gazeCircle.color,
   borderColor = settings.gazeCircle.borderColor,
   borderWidth = settings.gazeCircle.borderWidth,

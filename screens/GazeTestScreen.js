@@ -122,7 +122,7 @@ export default function GazeTestScreen() {
           )}
 
           <Text style={styles.footnote}>
-            The circle is {settings.gazeCircle.diameterCm} cm across - the same size as a
+            The circle is {settings.pointSelector.dotDiameterCm} cm across - the same size as a
             selectable point. If it can sit inside the grid dots without drifting, the tracker
             is accurate enough to try in the real flow.
           </Text>
@@ -136,7 +136,7 @@ export default function GazeTestScreen() {
         <GazeCircle
           position={tracker.rawPosition}
           visibility={tracker.visibility}
-          diameterCm={settings.gazeCircle.diameterCm}
+          diameterCm={settings.pointSelector.dotDiameterCm}
           color={settings.gazeCircle.rawGhostColor}
           borderColor={settings.gazeCircle.rawGhostBorderColor}
           borderWidth={1}
