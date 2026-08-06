@@ -90,7 +90,7 @@
     "dwellMs": 900,
     "stabilityRadiusCm": 1.2,
     "releaseRadiusCm": 2.0,
-    "matchToleranceCm": null,
+    "matchToleranceCm": 1,
     "pollIntervalMs": 40,
     "showProgress": true,
     "showGazeCircle": true,
