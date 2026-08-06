@@ -14,9 +14,15 @@ import { isHighSaliency, sampleSaliency } from '../utils/saliency';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const COVERAGE = settings.pointSelector.screenCoverage;
-const BOX_WIDTH = SCREEN_WIDTH * COVERAGE; // width is always fixed at this — never shrinks
+const BOX_WIDTH = SCREEN_WIDTH * COVERAGE; // width is always fixed at this -- never shrinks
 const MAX_BOX_HEIGHT = SCREEN_HEIGHT * 1.5; // generous safety cap for extreme aspect ratios; scrollable beyond screen height
 const DOT_SIZE = cmToPoints(settings.pointSelector.dotDiameterCm);
+// Minimum physical distance (in RN layout points, i.e. screen-independent
+// units -- see utils/physicalSize.js) required between two *consecutively*
+// tapped points. Defined in cm rather than pixels/normalized units so it
+// stays consistent across devices, per the thesis's physical-independence
+// requirement for tolerances.
+const MIN_DISTANCE = cmToPoints(settings.pointSelector.minDistanceCm ?? 2.0);
 
 /**
  * PointSelector
@@ -25,8 +31,17 @@ const DOT_SIZE = cmToPoints(settings.pointSelector.dotDiameterCm);
  * Points are stored as normalized coordinates { x, y } in the [0, 1] range,
  * so they stay valid regardless of screen size / resolution.
  *
+ * When `enforceMinDistance` is true (the default), each new tap must land
+ * at least `settings.pointSelector.minDistanceCm` away from the immediately
+ * preceding point (measured as a real physical distance, not normalized
+ * units) -- a tap that's too close to, or on top of, the last point is
+ * rejected with an Alert and not recorded. This is meant for registration
+ * only; pass `enforceMinDistance={false}` for login/verification, where the
+ * user is replicating an already-validated pattern and gaze-tracking noise
+ * could otherwise cause spurious rejections unrelated to a real mistake.
+ *
  * The image is sized to fit, without cropping, inside a bounding box that's
- * `screenCoverage` (settings.json) of the screen's width — a fixed width
+ * `screenCoverage` (settings.json) of the screen's width -- a fixed width
  * that never shrinks, so there's no left/right gap regardless of what else
  * is shown around it. Height is derived from the image's real aspect ratio
  * (Image.getSize) and allowed to grow freely, only capped by a generous
@@ -54,7 +69,7 @@ const DOT_SIZE = cmToPoints(settings.pointSelector.dotDiameterCm);
  *                                                  are picked, without waiting for a Confirm tap. Defaults to false.
  *   - saliencyMap?: SaliencyMap                 -> optional saliency heatmap (see utils/saliency.js). If provided,
  *                                                  caps how many of the (up to maxPoints) taps may land on a
- *                                                  high-saliency region — see saliencyMaxHighCount. If omitted/null,
+ *                                                  high-saliency region -- see saliencyMaxHighCount. If omitted/null,
  *                                                  no gating happens regardless of saliencyMaxHighCount.
  *   - saliencyMaxHighCount?: number             -> the maximum number of taps (out of all maxPoints, in any
  *                                                  order) allowed to land on a high-saliency region. Low-saliency
@@ -62,6 +77,9 @@ const DOT_SIZE = cmToPoints(settings.pointSelector.dotDiameterCm);
  *                                                  allowed at all, when saliencyMap is provided).
  *   - saliencyMinScore?: number                 -> the [0, 1] threshold a tap's saliency score must meet to
  *                                                  count as "high". Defaults to settings.json -> saliency.minScore.
+ *   - enforceMinDistance?: boolean              -> whether consecutive taps must be at least
+ *                                                  settings.json -> pointSelector.minDistanceCm apart.
+ *                                                  Defaults to true; set false for login/verification.
  *
  * If none of onCancel / showUndo / showReset / showConfirmButton apply, the
  * whole bottom action row is omitted, so the image gets that space too.
@@ -82,6 +100,7 @@ export default function PointSelector({
   saliencyMap = null,
   saliencyMaxHighCount = 0,
   saliencyMinScore = settings.saliency.minScore,
+  enforceMinDistance = true,
 }) {
   const [points, setPoints] = useState([]);
   const [boxSize, setBoxSize] = useState({ width: BOX_WIDTH, height: BOX_WIDTH });
@@ -90,7 +109,7 @@ export default function PointSelector({
   const showCancel = !!onCancel;
   const showActionsRow = showCancel || showUndo || showReset || showConfirmButton;
 
-  // Width is always fixed at `screenCoverage` of the screen — this is what
+  // Width is always fixed at `screenCoverage` of the screen -- this is what
   // eliminates the left/right empty gap. Height is derived from the image's
   // real aspect ratio and allowed to grow freely (the screen scrolls if it
   // doesn't fit), only capped by a generous safety limit for extreme
@@ -131,11 +150,30 @@ export default function PointSelector({
     const x = Math.min(Math.max(locationX / layout.width, 0), 1);
     const y = Math.min(Math.max(locationY / layout.height, 0), 1);
 
+    // Consecutive points may not overlap or land too close to one another.
+    // Distance is measured in actual on-screen RN layout points (derived
+    // from the normalized coords via the current `layout` size), not raw
+    // normalized units, so the cm-based threshold is meaningful regardless
+    // of the image's displayed size on this device.
+    if (enforceMinDistance && points.length > 0) {
+      const prev = points[points.length - 1];
+      const dx = (x - prev.x) * layout.width;
+      const dy = (y - prev.y) * layout.height;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      if (distance < MIN_DISTANCE) {
+        Alert.alert(
+          'Πολύ κοντά στο προηγούμενο σημείο',
+          `Διάλεξε ένα σημείο που απέχει τουλάχιστον ${settings.pointSelector.minDistanceCm} εκ. από το προηγούμενο.`
+        );
+        return;
+      }
+    }
+
     // At most `saliencyMaxHighCount` of the (up to maxPoints) taps, in any
     // order, may land on a high-saliency region of the image (per the
     // saliency map computed at image-upload time). Low-saliency taps are
     // never limited. A tap that would exceed the cap is rejected outright
-    // — it's not added to `points` — and the user sees an Alert instead,
+    // -- it's not added to `points` -- and the user sees an Alert instead,
     // asking them to pick a less visually-obvious point.
     if (saliencyMap) {
       const score = sampleSaliency(saliencyMap, x, y);

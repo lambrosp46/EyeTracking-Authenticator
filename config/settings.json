@@ -4,6 +4,7 @@
     "maxPoints": 5,
     "dotColor": "#007AFF",
     "dotDiameterCm": 1.5,
+    "minDistanceCm": 2.0,
     "screenCoverage": 0.98
   },
   "authentication": {

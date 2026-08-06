@@ -53,7 +53,7 @@ export function useGazeTracker(options = {}) {
   const lastReadoutRef = useRef(0);
   const rateRef = useRef({ count: 0, since: 0, hz: 0 });
 
-  // ---------------------------------------------------------------- sample
+  // ---------------------------------------------------------------- MARK: sample
   const handleSample = useCallback(
     (sample) => {
       // sampling rate, useful to confirm the native throttle is behaving
@@ -154,7 +154,7 @@ export function useGazeTracker(options = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ---------------------------------------------------------------- listeners
+  // ---------------------------------------------------------------- MARK: listeners
   useEffect(() => {
     const gaze = GazeTracker.addGazeListener(handleSample);
     const state = GazeTracker.addTrackingStateListener((e) => {
@@ -181,7 +181,7 @@ export function useGazeTracker(options = {}) {
     };
   }, [handleSample]);
 
-  // ---------------------------------------------------------------- control
+  // ---------------------------------------------------------------- MARK: control
   const start = useCallback(async () => {
     setError(null);
 
@@ -252,7 +252,7 @@ export function useGazeTracker(options = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ---------------------------------------------------------------- calibration
+  // ---------------------------------------------------------------- MARK: calibration
   useEffect(() => {
     if (!settings.calibration.autoLoad) return;
     let alive = true;

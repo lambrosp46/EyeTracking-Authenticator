@@ -90,6 +90,7 @@ export default function AuthPointsScreen({ route, navigation }) {
             showReset={false}
             showConfirmButton={false}
             autoSubmit
+            enforceMinDistance={false} // Allow points to be close together for authentication
           />
         ) : (
           <View style={styles.loadingContainer}>
