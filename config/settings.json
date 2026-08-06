@@ -90,11 +90,13 @@
     "dwellMs": 900,
     "stabilityRadiusCm": 1.2,
     "releaseRadiusCm": 2.0,
+    "matchToleranceCm": null,
     "pollIntervalMs": 40,
     "showProgress": true,
     "showGazeCircle": true,
     "showCapturedPoints": true,
     "requireCalibration": true,
-    "maxAttempts": 3
+    "maxAttempts": 3,
+    "logPoints": true
   }
 }

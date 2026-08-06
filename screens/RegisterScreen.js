@@ -5,14 +5,14 @@ import { useAuth } from '../hooks/useAuth';
 import ImageCapture from '../components/ImageCapture';
 import PointSelector from '../components/PointSelector';
 import settings from '../config/settings.json';
-import { pointsMatch } from '../utils/points';
+import { pointsMatchPhysical } from '../utils/points';
+import { pointsToCm } from '../utils/gazeMapping';
 import { getSaliencyMap, logSaliencyMapStats } from '../utils/saliency';
 import CalibrationOverlay from '../components/CalibrationOverlay';
 import GazePointConfirm from '../components/GazePointConfirm';
 import GazeCircle from '../components/GazeCircle';
 import useGazeTracker from '../hooks/useGazeTracker';
 
-const { toleranceRadius } = settings.authentication;
 const { minScore: saliencyMinScore, maxHighSaliencyPoints } = settings.saliency;
 
 // iOS needs the previous modal fully dismissed before the next is presented.
@@ -142,8 +142,38 @@ export default function RegisterScreen({ navigation }) {
   // Gaze confirmation pass: the looked-at points must match the tapped ones,
   // in order, within the same tolerance login will use. This is the only place
   // that stores `points`; it still does NOT touch the database.
-  const handleGazeConfirmed = (gazePoints) => {
-    if (pointsMatch(gazePoints, pendingPoints, toleranceRadius)) {
+  const handleGazeConfirmed = (gazePoints, meta) => {
+    // Verification rule: the gaze dot and the tapped dot count as the same
+    // point when their circles TOUCH, i.e. centre-to-centre distance <= the sum
+    // of the two radii. Both are drawn at dotDiameterCm, so that sum is one
+    // diameter. Comparing in centimetres (not normalized units) keeps the
+    // tolerance a true circle regardless of the image's aspect ratio.
+    const toleranceCm =
+      settings.gazeConfirm.matchToleranceCm ?? settings.pointSelector.dotDiameterCm;
+
+    const result = pointsMatchPhysical(
+      gazePoints,
+      pendingPoints,
+      meta?.boxSize ?? { width: 1, height: 1 },
+      toleranceCm,
+      pointsToCm
+    );
+
+    if (settings.gazeConfirm.logPoints) {
+      console.log('[Register] --- gaze verification ---');
+      console.log('[Register] tolerance:', toleranceCm.toFixed(2), 'cm (dots touching)');
+      result.details.forEach((d) => {
+        console.log(
+          `[Register] point ${d.index + 1}: ` +
+            `tapped(${d.expected.x.toFixed(4)}, ${d.expected.y.toFixed(4)}) ` +
+            `gaze(${d.gaze.x.toFixed(4)}, ${d.gaze.y.toFixed(4)}) ` +
+            `distance ${d.distanceCm.toFixed(2)}cm -> ${d.ok ? 'OK' : 'FAIL'}`
+        );
+      });
+      console.log('[Register] verdict:', result.ok ? 'MATCH' : 'NO MATCH');
+    }
+
+    if (result.ok) {
       setPoints(pendingPoints);
       setPointsStage('select');
       setPointsModalVisible(false);
@@ -164,9 +194,16 @@ export default function RegisterScreen({ navigation }) {
       setPointsStage('select');
       setSelectorKey((k) => k + 1);
     } else {
+      const worst = result.details.reduce(
+        (a, b) => (b.distanceCm > a.distanceCm ? b : a),
+        result.details[0]
+      );
       Alert.alert(
         'Δεν ταίριαξε',
-        `Τα σημεία που κοίταξες δεν ταιριάζουν. Προσπάθεια ${attempts}/${settings.gazeConfirm.maxAttempts}.`
+        `Τα σημεία που κοίταξες δεν ταιριάζουν. Χειρότερη απόκλιση: σημείο ${
+          worst.index + 1
+        }, ${worst.distanceCm.toFixed(1)}cm (όριο ${toleranceCm.toFixed(1)}cm). ` +
+          `Προσπάθεια ${attempts}/${settings.gazeConfirm.maxAttempts}.`
       );
       // Remount the confirm view so its captured points reset.
       setSelectorKey((k) => k + 1);
