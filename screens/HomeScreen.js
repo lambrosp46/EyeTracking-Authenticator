@@ -14,6 +14,9 @@ export default function HomeScreen( { navigation } ) {
                 <TouchableOpacity style={styles.button} onPress={() => navigation.navigate('Register')}>
                     <Text style={styles.buttonText}>Register</Text>
                 </TouchableOpacity>
+                <TouchableOpacity style={styles.button} onPress={() => navigation.navigate('Test Eye Tracker')}>
+                    <Text style={styles.buttonText}>Test Eye Tracker</Text>
+                </TouchableOpacity>
             </View>
         </View>
     )

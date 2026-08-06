@@ -10,6 +10,7 @@ import HomeScreen from './screens/HomeScreen';
 import LoginScreen from './screens/LoginScreen';
 import RegisterScreen from './screens/RegisterScreen';
 import AuthPointsScreen from './screens/AuthPointsScreen';
+import GazeTestScreen from './screens/GazeTestScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -30,6 +31,9 @@ export default function App() {
             component={AuthPointsScreen}
             options={{ headerShown: false }}
           />
+          <Stack.Screen name="Test Eye Tracker" 
+          component={GazeTestScreen} 
+          options={{ headerShown: false }}/>
         </Stack.Navigator>
       </NavigationContainer>
     </SQLiteProvider>

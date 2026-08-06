@@ -21,5 +21,75 @@
   "saliency": {
     "minScore": 0.3,
     "maxHighSaliencyPoints": 2
+  },
+
+  "eyeTracking": {
+    "updateIntervalMs": 33,
+    "rayMode": "eyeTransforms",
+    "useLeftEye": true,
+    "useRightEye": true,
+    "autoStopOnBackground": true,
+    "debugReadoutIntervalMs": 200,
+
+    "screen": {
+      "widthCm": null,
+      "heightCm": null,
+      "cameraOffsetXCm": null,
+      "cameraOffsetYCm": 0.6,
+      "invertX": false,
+      "invertY": false
+    },
+
+    "filter": {
+      "type": "oneEuro",
+      "minCutoff": 1.0,
+      "beta": 0.007,
+      "derivativeCutoff": 1.0,
+      "emaAlpha": 0.35
+    },
+
+    "validity": {
+      "blinkThreshold": 0.55,
+      "requireBothEyes": false,
+      "minFaceDistanceCm": 20,
+      "maxFaceDistanceCm": 70,
+      "maxEyeDisparityCm": 12,
+      "staleSampleMs": 400,
+      "clampToScreen": true
+    }
+  },
+
+  "calibration": {
+    "model": "quadratic",
+    "ridge": 0.000001,
+    "pattern": "9",
+    "customPoints": null,
+    "marginPercent": 0.12,
+    "warmupMs": 700,
+    "dwellMs": 1200,
+    "minSamplesPerPoint": 6,
+    "outlierTrimPercent": 0.25,
+    "targetDiameterCm": 1.2,
+    "targetColor": "#FFD60A",
+    "backgroundColor": "#000000",
+    "storageFile": "gaze-calibration.json",
+    "maxAcceptableErrorCm": 1.5,
+    "autoLoad": true
+  },
+
+  "gazeCircle": {
+    "enabled": true,
+    "diameterCm": 1.5,
+    "color": "rgba(10,132,255,0.30)",
+    "borderColor": "#0A84FF",
+    "borderWidth": 2,
+    "showCrosshair": true,
+    "crosshairColor": "#FFFFFF",
+    "hideWhenInvalid": true,
+    "invalidColor": "rgba(255,69,58,0.25)",
+    "invalidBorderColor": "#FF453A",
+    "showRawGhost": true,
+    "rawGhostColor": "rgba(255,255,255,0.10)",
+    "rawGhostBorderColor": "rgba(255,255,255,0.35)"
   }
 }
