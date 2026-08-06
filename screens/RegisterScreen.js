@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { View, Text, StyleSheet, TextInput, Image, TouchableOpacity, ScrollView, ActivityIndicator, Alert, Modal } from 'react-native';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
 import { useAuth } from '../hooks/useAuth';
@@ -7,12 +7,20 @@ import PointSelector from '../components/PointSelector';
 import settings from '../config/settings.json';
 import { pointsMatch } from '../utils/points';
 import { getSaliencyMap, logSaliencyMapStats } from '../utils/saliency';
+import CalibrationOverlay from '../components/CalibrationOverlay';
+import GazePointConfirm from '../components/GazePointConfirm';
+import GazeCircle from '../components/GazeCircle';
+import useGazeTracker from '../hooks/useGazeTracker';
 
 const { toleranceRadius } = settings.authentication;
 const { minScore: saliencyMinScore, maxHighSaliencyPoints } = settings.saliency;
 
+// iOS needs the previous modal fully dismissed before the next is presented.
+const MODAL_SWAP_MS = 450;
+
 export default function RegisterScreen({ navigation }) {
   const { register, loading } = useAuth();
+  const tracker = useGazeTracker();
   const [username, setUsername] = useState('');
   const [imageUri, setImageUri] = useState(null);
   const [points, setPoints] = useState(null);
@@ -26,12 +34,24 @@ export default function RegisterScreen({ navigation }) {
   const [saliencyMap, setSaliencyMap] = useState(null);
   const [saliencyLoading, setSaliencyLoading] = useState(false);
 
-  // Registration requires the user to pick their points twice, like a
-  // password-confirmation field, so a mis-tap on the only pass doesn't
-  // silently become their permanent (and un-repeatable) login pattern.
-  // 'select' = first pass, 'confirm' = must repeat the same points.
+  // Registration confirms the points by GAZE rather than by a second tap.
+  // Tapping twice only proves the user can repeat a tap; looking at the points
+  // proves they are reachable at this user's actual gaze accuracy, which is
+  // what decides whether they can ever log in. A point too near an edge, or two
+  // points closer together than the gaze error, now fails here instead of
+  // silently becoming an un-loginable account.
+  //
+  //   'select'  -> tap the points, press Confirm
+  //   'calibrate' -> fit this user's gaze mapping
+  //   'gaze'    -> look at the same points, in order
   const [pointsStage, setPointsStage] = useState('select');
   const [pendingPoints, setPendingPoints] = useState(null);
+  const [calibration, setCalibration] = useState(null);
+  const [calibrationQuality, setCalibrationQuality] = useState(null);
+  const [gazeAttempts, setGazeAttempts] = useState(0);
+  // CalibrationOverlay fires onComplete then onClose synchronously, so onClose
+  // cannot read the stage state it just set. A ref sees the write immediately.
+  const calibrationDoneRef = useRef(false);
   // Bumped to remount PointSelector (clearing its internal taps) whenever
   // we move between stages or restart after a mismatched confirmation.
   const [selectorKey, setSelectorKey] = useState(0);
@@ -64,31 +84,101 @@ export default function RegisterScreen({ navigation }) {
   };
 
   // Called by PointSelector's own Confirm button — only reachable once
-  // all required points are placed for the current stage.
-  const handlePointsSelected = (selectedPoints) => {
-    if (pointsStage === 'select') {
-      // First pass done — ask the user to repeat it for confirmation.
-      setPendingPoints(selectedPoints);
-      setPointsStage('confirm');
-      setSelectorKey((k) => k + 1);
+  // all required points are placed. Hands off to calibration, then to the
+  // gaze confirmation pass.
+  const handlePointsSelected = async (selectedPoints) => {
+    console.log('[Register] points confirmed, starting gaze session');
+    setPendingPoints(selectedPoints);
+    setGazeAttempts(0);
+    calibrationDoneRef.current = false;
+
+    if (!settings.gazeConfirm.requireCalibration) {
+      setPointsStage('gaze');
       return;
     }
 
-    // Confirmation pass: must match the first pass (same order, same
-    // tolerance used for login) before it's accepted. This is the only
-    // place that stores `points`; it still does NOT touch the database.
-    if (pointsMatch(selectedPoints, pendingPoints, toleranceRadius)) {
-      setPoints(selectedPoints);
-      setPointsModalVisible(false);
-    } else {
+    // The gaze session has to be live before the calibration overlay opens,
+    // otherwise it has nothing to collect.
+    const ok = await tracker.start();
+    console.log('[Register] tracker.start ->', ok, 'error:', tracker.error);
+    if (!ok) {
       Alert.alert(
-        'Τα σημεία δεν ταιριάζουν',
-        'Η επιβεβαίωση δεν ταίριαξε με την πρώτη επιλογή. Παρακαλώ επιλέξτε ξανά.'
+        'Το eye tracking δεν είναι διαθέσιμο',
+        tracker.error ??
+          'Χρειάζεται συσκευή με TrueDepth κάμερα και development build. Δες την οθόνη Gaze Test.'
+      );
+      return;
+    }
+
+    // iOS will not present a second modal while the first is still up - the
+    // new one silently never appears. Dismiss the point-selection modal, wait
+    // for the dismissal to finish, then open calibration.
+    setPointsModalVisible(false);
+    setTimeout(() => {
+      console.log('[Register] opening calibration overlay');
+      setPointsStage('calibrate');
+    }, MODAL_SWAP_MS);
+  };
+
+  // Calibration finished — keep the fit in memory (it is written to the DB
+  // only if the user actually completes registration) and move to gaze confirm.
+  const handleCalibrationComplete = (result) => {
+    console.log('[Register] calibration complete:', result?.quality?.rmseCm, 'cm');
+    if (!result?.calibration) {
+      abortToSelection();
+      return;
+    }
+    calibrationDoneRef.current = true;
+    setCalibration(result.calibration);
+    setCalibrationQuality(result.quality ?? null);
+    // Same modal-swap dance in reverse: the calibration modal has to finish
+    // dismissing before the point modal can be presented again.
+    setTimeout(() => {
+      setPointsStage('gaze');
+      setPointsModalVisible(true);
+    }, MODAL_SWAP_MS);
+  };
+
+  // Gaze confirmation pass: the looked-at points must match the tapped ones,
+  // in order, within the same tolerance login will use. This is the only place
+  // that stores `points`; it still does NOT touch the database.
+  const handleGazeConfirmed = (gazePoints) => {
+    if (pointsMatch(gazePoints, pendingPoints, toleranceRadius)) {
+      setPoints(pendingPoints);
+      setPointsStage('select');
+      setPointsModalVisible(false);
+      tracker.stop();
+      return;
+    }
+
+    const attempts = gazeAttempts + 1;
+    setGazeAttempts(attempts);
+
+    if (attempts >= settings.gazeConfirm.maxAttempts) {
+      Alert.alert(
+        'Η επιβεβαίωση με το βλέμμα απέτυχε',
+        'Δοκίμασε να επιλέξεις σημεία πιο μακριά μεταξύ τους και πιο μέσα από τις άκρες της εικόνας.'
       );
       setPendingPoints(null);
+      setGazeAttempts(0);
       setPointsStage('select');
       setSelectorKey((k) => k + 1);
+    } else {
+      Alert.alert(
+        'Δεν ταίριαξε',
+        `Τα σημεία που κοίταξες δεν ταιριάζουν. Προσπάθεια ${attempts}/${settings.gazeConfirm.maxAttempts}.`
+      );
+      // Remount the confirm view so its captured points reset.
+      setSelectorKey((k) => k + 1);
     }
+  };
+
+  // Calibration was cancelled or failed: drop back to point selection and
+  // bring the selection modal back up.
+  const abortToSelection = () => {
+    setPointsStage('select');
+    setSelectorKey((k) => k + 1);
+    setTimeout(() => setPointsModalVisible(true), MODAL_SWAP_MS);
   };
 
   // Cancel button in the modal header — closes without saving.
@@ -97,6 +187,8 @@ export default function RegisterScreen({ navigation }) {
     setPointsModalVisible(false);
     setPendingPoints(null);
     setPointsStage('select');
+    setGazeAttempts(0);
+    tracker.stop();
   };
 
   // Opens the point-selection modal fresh, always starting at the
@@ -105,6 +197,7 @@ export default function RegisterScreen({ navigation }) {
   const openPointsModal = () => {
     setPendingPoints(null);
     setPointsStage('select');
+    setGazeAttempts(0);
     setSelectorKey((k) => k + 1);
     setPointsModalVisible(true);
   };
@@ -121,7 +214,7 @@ export default function RegisterScreen({ navigation }) {
     }
 
     try {
-      await register(username, imageUri, points);
+      await register(username, imageUri, points, calibration, calibrationQuality);
       Alert.alert('Success', 'Registration saved.');
       navigation?.goBack?.();
     } catch (err) {
@@ -208,15 +301,10 @@ export default function RegisterScreen({ navigation }) {
         <SafeAreaProvider>
           <SafeAreaView style={styles.modalContainer}>
             <View style={styles.modalBody}>
-              {imageUri && (
+              {imageUri && pointsStage === 'select' && (
                 <PointSelector
                   key={selectorKey}
                   imageUri={imageUri}
-                  title={
-                    pointsStage === 'confirm'
-                      ? 'Επιβεβαίωσε επιλέγοντας ξανά τα ίδια σημεία'
-                      : undefined
-                  }
                   onComplete={handlePointsSelected}
                   onCancel={handleCancelPoints}
                   saliencyMap={saliencyMap}
@@ -224,10 +312,44 @@ export default function RegisterScreen({ navigation }) {
                   saliencyMinScore={saliencyMinScore}
                 />
               )}
+
+              {imageUri && pointsStage === 'gaze' && (
+                <GazePointConfirm
+                  key={selectorKey}
+                  imageUri={imageUri}
+                  tracker={tracker}
+                  expectedCount={settings.pointSelector.maxPoints}
+                  onComplete={handleGazeConfirmed}
+                  onCancel={handleCancelPoints}
+                />
+              )}
             </View>
           </SafeAreaView>
         </SafeAreaProvider>
+
+        {/*
+          The gaze cursor must be a direct child of the Modal, NOT inside the
+          SafeAreaView. GazeCircle positions itself with absoluteFill and the
+          gaze coordinates are window coordinates - nested inside the safe area
+          its origin starts below the notch, so the cursor would be drawn lower
+          than the point actually being looked at.
+        */}
+        {pointsStage === 'gaze' && settings.gazeConfirm.showGazeCircle && (
+          <GazeCircle position={tracker.position} visibility={tracker.visibility} />
+        )}
       </Modal>
+
+      <CalibrationOverlay
+        visible={pointsStage === 'calibrate'}
+        mode="calibrate"
+        tracker={tracker}
+        onClose={() => {
+          // Only treat this as an abort if calibration didn't actually succeed;
+          // on success handleCalibrationComplete has already moved us to 'gaze'.
+          if (!calibrationDoneRef.current) abortToSelection();
+        }}
+        onComplete={handleCalibrationComplete}
+      />
     </SafeAreaProvider>
   );
 }

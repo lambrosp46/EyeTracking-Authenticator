@@ -6,6 +6,8 @@ import {
   getUserByUsername,
   getUserPoints,
   getImageUri,
+  saveUserCalibration,
+  getUserCalibration,
 } from '../database/db';
 
 export function useAuth() {
@@ -17,8 +19,13 @@ export function useAuth() {
    * Registers a new user: saves the image permanently, creates the
    * Users row, then saves the selected points.
    * Throws if the username is already taken.
+   *
+   * `calibration` is the gaze mapping fitted during registration. It is stored
+   * per user rather than in one shared file, because the fit encodes that
+   * person's own eye geometry - sharing one across accounts would make every
+   * user after the first authenticate through someone else's correction.
    */
-  async function register(username, imageUri, points) {
+  async function register(username, imageUri, points, calibration = null, quality = null) {
     setLoading(true);
     setError(null);
     try {
@@ -30,6 +37,9 @@ export function useAuth() {
 
       const userId = await createUser(db, trimmed, imageUri);
       await savePoints(db, userId, points);
+      if (calibration) {
+        await saveUserCalibration(db, userId, calibration, quality);
+      }
 
       return userId;
     } catch (err) {
@@ -52,10 +62,12 @@ export function useAuth() {
       if (!user) return null;
 
       const points = await getUserPoints(db, user.id);
+      const calibration = await getUserCalibration(db, user.id);
       return {
         userId: user.id,
         imageUri: getImageUri(user.image_filename),
         points, // stored points, to compare against a new attempt
+        calibration, // this user's own gaze mapping, or null if never calibrated
       };
     } catch (err) {
       setError(err.message);

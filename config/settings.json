@@ -23,7 +23,6 @@
     "minScore": 0.3,
     "maxHighSaliencyPoints": 2
   },
-
   "eyeTracking": {
     "updateIntervalMs": 33,
     "rayMode": "eyeTransforms",
@@ -31,7 +30,6 @@
     "useRightEye": true,
     "autoStopOnBackground": true,
     "debugReadoutIntervalMs": 200,
-
     "screen": {
       "widthCm": null,
       "heightCm": null,
@@ -40,7 +38,6 @@
       "invertX": false,
       "invertY": false
     },
-
     "filter": {
       "type": "oneEuro",
       "minCutoff": 1.0,
@@ -48,7 +45,6 @@
       "derivativeCutoff": 1.0,
       "emaAlpha": 0.35
     },
-
     "validity": {
       "blinkThreshold": 0.55,
       "requireBothEyes": false,
@@ -59,10 +55,9 @@
       "clampToScreen": true
     }
   },
-
   "calibration": {
     "model": "quadratic",
-    "ridge": 0.000001,
+    "ridge": 1e-06,
     "pattern": "9",
     "customPoints": null,
     "marginPercent": 0.12,
@@ -77,7 +72,6 @@
     "maxAcceptableErrorCm": 1.5,
     "autoLoad": true
   },
-
   "gazeCircle": {
     "enabled": true,
     "color": "rgba(10,132,255,0.30)",
@@ -91,5 +85,16 @@
     "showRawGhost": true,
     "rawGhostColor": "rgba(255,255,255,0.10)",
     "rawGhostBorderColor": "rgba(255,255,255,0.35)"
+  },
+  "gazeConfirm": {
+    "dwellMs": 900,
+    "stabilityRadiusCm": 1.2,
+    "releaseRadiusCm": 2.0,
+    "pollIntervalMs": 40,
+    "showProgress": true,
+    "showGazeCircle": true,
+    "showCapturedPoints": true,
+    "requireCalibration": true,
+    "maxAttempts": 3
   }
 }
