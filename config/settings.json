@@ -8,7 +8,6 @@
     "screenCoverage": 0.98
   },
   "authentication": {
-    "toleranceRadius": 0.05,
     "maxAttempts": 5
   },
   "storage": {
@@ -97,6 +96,23 @@
     "showCapturedPoints": true,
     "requireCalibration": true,
     "maxAttempts": 3,
+    "logPoints": true
+  },
+  "gazeAuth": {
+    "dwellMs": 900,
+    "stabilityRadiusCm": 0.9,
+    "releaseRadiusCm": 2.0,
+    "matchToleranceCm": 1.0,
+    "pollIntervalMs": 40,
+    "showProgress": true,
+    "showGazeCircle": true,
+    "showCapturedPoints": true,
+    "requireCalibration": true,
+    "maxAttempts": 3,
+    "attemptTimeoutMs": 60000,
+    "allowUndo": false,
+    "allowReset": true,
+    "saveSessionCalibration": true,
     "logPoints": true
   }
 }

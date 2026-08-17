@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
@@ -11,8 +11,6 @@ import {
 
 import settings from '../config/settings.json';
 import { cmToPoints } from '../utils/gazeMapping';
-
-const cfg = settings.gazeConfirm;
 
 // These MUST match PointSelector's sizing exactly. PointSelector sizes its box
 // to the image's true aspect ratio so the image fills it edge to edge, and
@@ -47,7 +45,20 @@ export default function GazePointConfirm({
   onComplete,
   onCancel,
   title,
+  subtitle,
+  // Overrides for settings.gazeConfirm. Registration passes nothing and gets
+  // the defaults; login passes settings.gazeAuth so the two passes can be
+  // tuned independently. Registration's gaze pass is a feasibility check on
+  // points the user has just tapped, while login's IS the credential, so it
+  // wants a tighter dwell and no on-screen trace of where the user looked.
+  config,
+  showUndo = true,
+  showReset = true,
 }) {
+  // `config` comes straight from a settings.json import, so its identity is
+  // stable across renders and this memo effectively runs once per mount.
+  const cfg = useMemo(() => ({ ...settings.gazeConfirm, ...(config ?? {}) }), [config]);
+
   const [captured, setCaptured] = useState([]);
   const [imageRect, setImageRect] = useState(null);
   const [boxSize, setBoxSize] = useState({ width: BOX_WIDTH, height: BOX_WIDTH });
@@ -149,7 +160,7 @@ export default function GazePointConfirm({
         });
       }
     },
-    [expectedCount, imageRect, onComplete]
+    [cfg, expectedCount, imageRect, onComplete]
   );
 
   useEffect(() => {
@@ -207,7 +218,7 @@ export default function GazePointConfirm({
     }, cfg.pollIntervalMs);
 
     return () => clearInterval(id);
-  }, [imageRect, captured.length, armed, expectedCount, commit, releaseRadius, stabilityRadius, tracker]);
+  }, [cfg, imageRect, captured.length, armed, expectedCount, commit, releaseRadius, stabilityRadius, tracker]);
 
   const undo = () => {
     const next = capturedRef.current.slice(0, -1);
@@ -234,9 +245,10 @@ export default function GazePointConfirm({
         {title ?? 'Κοίτα τα σημεία σου με τη σειρά'}
       </Text>
       <Text style={styles.subtitle}>
-        {armed
-          ? `Κράτησε το βλέμμα σου σταθερό (${captured.length + 1}/${expectedCount})`
-          : 'Κοίτα αλλού για το επόμενο σημείο'}
+        {subtitle ??
+          (armed
+            ? `Κράτησε το βλέμμα σου σταθερό (${captured.length + 1}/${expectedCount})`
+            : 'Κοίτα αλλού για το επόμενο σημείο')}
       </Text>
 
       <View style={styles.imageOuter}>
@@ -290,12 +302,16 @@ export default function GazePointConfirm({
         <TouchableOpacity onPress={onCancel} style={styles.ghostButton}>
           <Text style={styles.ghostText}>Ακύρωση</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={undo} disabled={!captured.length} style={styles.ghostButton}>
-          <Text style={[styles.ghostText, !captured.length && styles.disabled]}>Αναίρεση</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={reset} disabled={!captured.length} style={styles.ghostButton}>
-          <Text style={[styles.ghostText, !captured.length && styles.disabled]}>Επανεκκίνηση</Text>
-        </TouchableOpacity>
+        {showUndo && (
+          <TouchableOpacity onPress={undo} disabled={!captured.length} style={styles.ghostButton}>
+            <Text style={[styles.ghostText, !captured.length && styles.disabled]}>Αναίρεση</Text>
+          </TouchableOpacity>
+        )}
+        {showReset && (
+          <TouchableOpacity onPress={reset} disabled={!captured.length} style={styles.ghostButton}>
+            <Text style={[styles.ghostText, !captured.length && styles.disabled]}>Επανεκκίνηση</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
     </View>

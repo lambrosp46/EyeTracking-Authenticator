@@ -77,5 +77,22 @@ export function useAuth() {
     }
   }
 
-  return { register, loadForLogin, loading, error };
+  /**
+   * Stores the calibration fitted at the start of a login session.
+   *
+   * Rows are appended, never replaced, so the Calibrations table becomes a
+   * per-user timeline: one fit per registration plus one per login. That
+   * history is what makes it possible to show how a user's accuracy drifts
+   * across sessions, which a single overwritten "current" fit could not.
+   *
+   * Deliberately does NOT touch `loading` - it runs in the background while the
+   * user is already looking at their points, and must never gate the UI or make
+   * a login fail because a write was slow.
+   */
+  async function saveSessionCalibration(userId, calibration, quality = null) {
+    if (!userId || !calibration) return null;
+    return saveUserCalibration(db, userId, calibration, quality);
+  }
+
+  return { register, loadForLogin, saveSessionCalibration, loading, error };
 }

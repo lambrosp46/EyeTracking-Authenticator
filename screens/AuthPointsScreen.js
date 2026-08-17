@@ -1,30 +1,93 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Alert, TouchableOpacity, ActivityIndicator } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
-import PointSelector from '../components/PointSelector';
+
 import settings from '../config/settings.json';
+import CalibrationOverlay from '../components/CalibrationOverlay';
+import GazeCircle from '../components/GazeCircle';
+import GazePointConfirm from '../components/GazePointConfirm';
+import useGazeTracker from '../hooks/useGazeTracker';
+import { useAuth } from '../hooks/useAuth';
 import { cropToStandardAspectRatio } from '../utils/imageAspect';
-import { pointsMatch } from '../utils/points';
+import { pointsToCm } from '../utils/gazeMapping';
+import { pointsMatchPhysical } from '../utils/points';
 
-const { toleranceRadius, maxAttempts } = settings.authentication;
+const cfg = settings.gazeAuth;
 
+// iOS will not present a new modal while another is still dismissing, and a
+// view sitting behind a full-screen modal cannot be measured reliably. Wait for
+// the calibration overlay to finish going away before mounting the gaze pass,
+// otherwise measureInWindow reports a mid-animation rect and every captured
+// point lands offset from where the user actually looked.
+const MODAL_SWAP_MS = 450;
+
+/**
+ * Login by gaze.
+ *
+ * The user looks at their five password points in order; each one is captured
+ * by dwell (see GazePointConfirm) and nothing is compared until all five are
+ * in. Evaluating the whole sequence at the end rather than point by point is
+ * deliberate: per-point feedback would turn one 5-point secret into five
+ * independent 1-point guesses, and would also tell an attacker which point
+ * they got right.
+ *
+ * Calibration runs at the start of every login, not once per install. Viewing
+ * distance, posture and lighting all change between sessions, and a stale fit
+ * shows up as a false rejection that has nothing to do with the password.
+ *
+ * Flow:
+ *   'prepare'   -> crop the stored image, start the ARKit session
+ *   'calibrate' -> fit this session's gaze mapping
+ *   'gaze'      -> look at the five points; verdict on the fifth
+ */
 export default function AuthPointsScreen({ route, navigation }) {
-  const { username, imageUri, storedPoints } = route.params;
-  const [displayUri, setDisplayUri] = useState(null);
-  const [attempts, setAttempts] = useState(0);
-  // Bumped after every failed attempt to remount PointSelector, which clears
-  // its internal `points` state. Without this, PointSelector's handlePress
-  // permanently blocks further taps once maxPoints is reached (autoSubmit
-  // mode has no Undo/Reset/Confirm buttons here), so a wrong attempt would
-  // otherwise leave the user stuck with no way to retry except Cancel.
-  const [selectorKey, setSelectorKey] = useState(0);
+  const { username, userId, imageUri, storedPoints } = route.params;
 
-  // Re-crop the stored image to the standard 16:9-family aspect ratio before
-  // showing it, so it lines up with the coordinate space the points were
-  // originally saved in (matters for images stored before this crop existed).
+  const tracker = useGazeTracker();
+  const { saveSessionCalibration } = useAuth();
+
+  const [displayUri, setDisplayUri] = useState(null);
+  const [stage, setStage] = useState('prepare');
+  const [statusText, setStatusText] = useState('Προετοιμασία εικόνας…');
+  const [attempts, setAttempts] = useState(0);
+  // Bumped after every failed attempt to remount GazePointConfirm, which clears
+  // its captured points and re-arms the dwell detector.
+  const [attemptKey, setAttemptKey] = useState(0);
+
+  // useGazeTracker returns a fresh object every render and re-renders this
+  // screen ~5x/sec (its throttled debug readout). Nothing here may close over
+  // `tracker` directly, or every callback below gets a new identity 5 times a
+  // second - which would silently re-arm the attempt timeout forever and never
+  // let it fire. Refs keep the identities stable.
+  const trackerRef = useRef(tracker);
+  trackerRef.current = tracker;
+
+  const attemptsRef = useRef(0);
+  // One attempt can be ended either by the fifth capture or by the timeout.
+  // Whichever gets there first sets this, so the other becomes a no-op.
+  const settledRef = useRef(false);
+  // CalibrationOverlay fires onComplete then onClose synchronously, so onClose
+  // cannot read state that onComplete just set. A ref sees the write at once.
+  const calibrationDoneRef = useRef(false);
+  const startedRef = useRef(false);
+  const finishingRef = useRef(false);
+
+  const toleranceCm = cfg.matchToleranceCm ?? settings.pointSelector.dotDiameterCm;
+  const maxAttempts = cfg.maxAttempts ?? settings.authentication.maxAttempts;
+
+  // Re-crop the stored image to the standard aspect ratio before showing it.
+  // ImageCapture already crops at registration, so for current accounts this is
+  // a no-op that returns the same URI; it matters only for images stored before
+  // that crop existed, whose points were normalised against a different box.
   useEffect(() => {
     let cancelled = false;
-    setDisplayUri(null);
     cropToStandardAspectRatio(imageUri).then((uri) => {
       if (!cancelled) setDisplayUri(uri);
     });
@@ -33,80 +96,242 @@ export default function AuthPointsScreen({ route, navigation }) {
     };
   }, [imageUri]);
 
-  const handleComplete = (attemptPoints) => {
-    const sortedStored = [...storedPoints].sort(
-      (a, b) => a.point_index - b.point_index
-    );
+  const leave = useCallback(
+    (toHome) => {
+      finishingRef.current = true;
+      trackerRef.current.stop();
+      if (toHome) navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
+      else navigation.goBack();
+    },
+    [navigation]
+  );
 
-    const matches = pointsMatch(attemptPoints, sortedStored, toleranceRadius);
+  // Stop the ARKit session on unmount however the screen is left (back gesture,
+  // header back button, reset) - not just through our own buttons.
+  useEffect(() => {
+    return () => {
+      trackerRef.current.stop();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-    if (matches) {
-      Alert.alert('Login Successful', `Welcome, ${username}!`, [
-        { text: 'OK', onPress: () => navigation.reset({ index: 0, routes: [{ name: 'Home' }] }) },
+  // Start the session once the image is ready. The session has to be live
+  // before the calibration overlay opens, otherwise it has no samples to fit.
+  useEffect(() => {
+    if (!displayUri || startedRef.current) return;
+    startedRef.current = true;
+
+    (async () => {
+      setStatusText('Εκκίνηση eye tracking…');
+      const ok = await trackerRef.current.start();
+      if (finishingRef.current) return;
+
+      if (!ok) {
+        Alert.alert(
+          'Το eye tracking δεν είναι διαθέσιμο',
+          trackerRef.current.error ??
+            'Χρειάζεται συσκευή με TrueDepth κάμερα και development build. Δες την οθόνη Gaze Test.',
+          [{ text: 'OK', onPress: () => leave(false) }]
+        );
+        return;
+      }
+
+      if (!cfg.requireCalibration) {
+        setStage('gaze');
+        return;
+      }
+      setStatusText('Βαθμονόμηση…');
+      setStage('calibrate');
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [displayUri]);
+
+  const handleCalibrationComplete = useCallback(
+    (result) => {
+      if (!result?.calibration) {
+        leave(false);
+        return;
+      }
+      calibrationDoneRef.current = true;
+
+      if (result.quality?.rmseCm != null) {
+        const limit = settings.calibration.maxAcceptableErrorCm;
+        console.log(
+          `[GazeLogin] calibration rmse ${result.quality.rmseCm.toFixed(2)}cm ` +
+            `(limit ${limit}cm)${result.quality.rmseCm > limit ? ' -- ABOVE LIMIT' : ''}`
+        );
+      }
+
+      // Every session's fit is kept, which is what makes the drift analysis
+      // possible later. A failure here must not block the login.
+      if (cfg.saveSessionCalibration && userId != null) {
+        saveSessionCalibration(userId, result.calibration, result.quality ?? null).catch((err) =>
+          console.warn('[GazeLogin] could not store session calibration', err)
+        );
+      }
+
+      setTimeout(() => {
+        if (finishingRef.current) return;
+        settledRef.current = false;
+        setStage('gaze');
+      }, MODAL_SWAP_MS);
+    },
+    [leave, saveSessionCalibration, userId]
+  );
+
+  const failAttempt = useCallback(
+    (reason) => {
+      const next = attemptsRef.current + 1;
+      attemptsRef.current = next;
+      setAttempts(next);
+
+      if (next >= maxAttempts) {
+        Alert.alert(
+          'Η σύνδεση απέτυχε',
+          'Πάρα πολλές αποτυχημένες προσπάθειες. Ξεκίνα από την αρχή.',
+          [{ text: 'OK', onPress: () => leave(true) }]
+        );
+        return;
+      }
+
+      // Deliberately generic: the user is told only that the attempt failed,
+      // never which point missed or by how much. The per-point distances go to
+      // the console for the evaluation, not to the screen.
+      const message =
+        reason === 'timeout'
+          ? `Έληξε ο χρόνος για αυτή την προσπάθεια. Προσπάθεια ${next + 1}/${maxAttempts}.`
+          : `Τα σημεία δεν ταιριάζουν. Προσπάθεια ${next + 1}/${maxAttempts}.`;
+
+      Alert.alert('Η σύνδεση απέτυχε', message, [
+        {
+          text: 'Δοκίμασε ξανά',
+          onPress: () => {
+            settledRef.current = false;
+            setAttemptKey((k) => k + 1);
+          },
+        },
       ]);
-      return;
-    }
+    },
+    [leave, maxAttempts]
+  );
 
-    const nextAttempts = attempts + 1;
-    setAttempts(nextAttempts);
+  // Read through a ref inside the timeout effect below, so that effect can
+  // depend only on the attempt actually changing.
+  const failAttemptRef = useRef(failAttempt);
+  failAttemptRef.current = failAttempt;
 
-    if (nextAttempts >= maxAttempts) {
-      Alert.alert(
-        'Login Failed',
-        'Too many failed attempts. Please try again from the start.',
-        [{ text: 'OK', onPress: () => navigation.reset({ index: 0, routes: [{ name: 'Home' }] }) }]
+  const handleAttempt = useCallback(
+    (gazePoints, meta) => {
+      if (settledRef.current) return;
+      settledRef.current = true;
+
+      const stored = [...storedPoints].sort((a, b) => a.point_index - b.point_index);
+
+      // Matching rule: the gaze dot and the stored dot count as the same point
+      // when their circles touch, i.e. centre-to-centre distance <= the sum of
+      // the radii. Comparing in centimetres rather than normalized units keeps
+      // the tolerance a true circle whatever the image's aspect ratio, and
+      // keeps it independent of screen size and density.
+      const result = pointsMatchPhysical(
+        gazePoints,
+        stored,
+        meta?.boxSize ?? { width: 1, height: 1 },
+        toleranceCm,
+        pointsToCm
       );
-      return;
-    }
 
-    Alert.alert(
-      'Login Failed',
-      `The selected points did not match. Attempt ${nextAttempts}/${maxAttempts}.`,
-      [{ text: 'OK', onPress: () => setSelectorKey((k) => k + 1) }]
-    );
-  };
+      if (cfg.logPoints) {
+        console.log(`[GazeLogin] --- attempt ${attemptsRef.current + 1} for "${username}" ---`);
+        console.log('[GazeLogin] tolerance:', toleranceCm.toFixed(2), 'cm');
+        result.details.forEach((d) => {
+          console.log(
+            `[GazeLogin] point ${d.index + 1}: ` +
+              `stored(${d.expected.x.toFixed(4)}, ${d.expected.y.toFixed(4)}) ` +
+              `gaze(${d.gaze.x.toFixed(4)}, ${d.gaze.y.toFixed(4)}) ` +
+              `distance ${d.distanceCm.toFixed(2)}cm -> ${d.ok ? 'OK' : 'FAIL'}`
+          );
+        });
+        console.log('[GazeLogin] verdict:', result.ok ? 'MATCH' : 'NO MATCH');
+      }
 
-  const handleCalibrate = () => {
-    // No-op for now
-  };
+      if (result.ok) {
+        Alert.alert('Επιτυχής σύνδεση', `Καλώς όρισες, ${username}!`, [
+          { text: 'OK', onPress: () => leave(true) },
+        ]);
+        return;
+      }
 
-  const handleCancel = () => {
-    navigation.goBack();
-  };
+      failAttempt('mismatch');
+    },
+    [failAttempt, leave, storedPoints, toleranceCm, username]
+  );
+
+  // Per-attempt ceiling. Without it, a user who simply cannot land a dwell on
+  // one of their points sits on this screen forever with no way forward except
+  // Cancel, and the attempt is never recorded as a failure.
+  useEffect(() => {
+    if (stage !== 'gaze' || !cfg.attemptTimeoutMs) return undefined;
+    const id = setTimeout(() => {
+      if (settledRef.current) return;
+      settledRef.current = true;
+      failAttemptRef.current('timeout');
+    }, cfg.attemptTimeoutMs);
+    return () => clearTimeout(id);
+  }, [stage, attemptKey]);
+
+  const gazeReady = stage === 'gaze' && displayUri;
 
   return (
     <SafeAreaProvider>
       <SafeAreaView style={styles.container}>
-        {displayUri ? (
-          <PointSelector
-            key={selectorKey}
+        {gazeReady ? (
+          <GazePointConfirm
+            key={attemptKey}
             imageUri={displayUri}
-            maxPoints={storedPoints.length}
-            showMarkers={settings.pointSelector.showSelectedPoints}
-            onComplete={handleComplete}
-            showInstructions={false}
-            showCounter
-            showUndo={false}
-            showReset={false}
-            showConfirmButton={false}
-            autoSubmit
-            enforceMinDistance={false} // Allow points to be close together for authentication
+            tracker={tracker}
+            expectedCount={storedPoints.length}
+            config={cfg}
+            showUndo={cfg.allowUndo}
+            showReset={cfg.allowReset}
+            title={`Κοίτα τα σημεία του κωδικού σου με τη σειρά (${attempts + 1}/${maxAttempts})`}
+            onComplete={handleAttempt}
+            onCancel={() => leave(false)}
           />
         ) : (
           <View style={styles.loadingContainer}>
             <ActivityIndicator />
+            <Text style={styles.loadingText}>{statusText}</Text>
+            <TouchableOpacity style={styles.cancelButton} onPress={() => leave(false)}>
+              <Text style={styles.cancelButtonText}>Ακύρωση</Text>
+            </TouchableOpacity>
           </View>
         )}
-
-        <View style={styles.actionsRow}>
-          <TouchableOpacity style={styles.calibrateButton} onPress={handleCalibrate}>
-            <Text style={styles.buttonText}>Calibrate</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.cancelButton} onPress={handleCancel}>
-            <Text style={styles.cancelButtonText}>Cancel</Text>
-          </TouchableOpacity>
-        </View>
       </SafeAreaView>
+
+      {/*
+        The gaze cursor must sit OUTSIDE the SafeAreaView. Gaze coordinates are
+        window coordinates, and inside the safe area the origin starts below the
+        notch - the cursor would be drawn lower than the point being looked at.
+
+        Off by default: the cursor is a live readout of exactly where the user
+        is looking, so leaving it on makes the password readable over their
+        shoulder. Turn it on in settings.json only for demos and debugging.
+      */}
+      {gazeReady && cfg.showGazeCircle && (
+        <GazeCircle position={tracker.position} visibility={tracker.visibility} />
+      )}
+
+      <CalibrationOverlay
+        visible={stage === 'calibrate'}
+        mode="calibrate"
+        tracker={tracker}
+        onClose={() => {
+          // Only an abort if calibration didn't succeed; on success
+          // handleCalibrationComplete has already moved us to 'gaze'.
+          if (!calibrationDoneRef.current) leave(false);
+        }}
+        onComplete={handleCalibrationComplete}
+      />
     </SafeAreaProvider>
   );
 }
@@ -115,38 +340,22 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
-    paddingTop: 16,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  actionsRow: {
-    flexDirection: 'row',
     gap: 12,
-    marginTop: 16,
-    marginBottom: 24,
-    paddingHorizontal: 16,
   },
-  calibrateButton: {
-    flex: 1,
-    paddingVertical: 10,
-    paddingHorizontal: 18,
-    borderRadius: 8,
-    alignItems: 'center',
-    backgroundColor: '#007AFF',
-  },
-  buttonText: {
-    color: '#fff',
-    fontWeight: '600',
+  loadingText: {
+    fontSize: 14,
+    color: '#6b7280',
   },
   cancelButton: {
-    flex: 1,
+    marginTop: 24,
     paddingVertical: 10,
-    paddingHorizontal: 18,
+    paddingHorizontal: 24,
     borderRadius: 8,
-    alignItems: 'center',
     backgroundColor: '#f0f0f0',
   },
   cancelButtonText: {

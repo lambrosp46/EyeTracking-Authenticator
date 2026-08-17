@@ -32,8 +32,11 @@ export default function LoginScreen({ navigation }) {
         return;
       }
 
+      // userId travels with the rest so the login screen can append this
+      // session's calibration to that user's history (drift analysis).
       navigation.navigate('AuthPoints', {
         username: trimmed,
+        userId: result.userId,
         imageUri: result.imageUri,
         storedPoints: result.points,
       });
