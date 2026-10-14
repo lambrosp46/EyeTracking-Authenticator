@@ -90,12 +90,12 @@
       "exitToleranceFactor": 1.5,
       "holdStillMs": 600,
       "compensated": {
-        "distanceToleranceCm": 2.5,
-        "eyeXToleranceCm": 1.2,
-        "eyeYToleranceCm": 1.2,
-        "maxHeadYawDeg": 3,
-        "maxHeadPitchDeg": 3.5,
-        "maxHeadRollDeg": 4
+        "distanceToleranceCm": 2.0,
+        "eyeXToleranceCm": 1.0,
+        "eyeYToleranceCm": 0.8,
+        "maxHeadYawDeg": 2.5,
+        "maxHeadPitchDeg": 2,
+        "maxHeadRollDeg": 3.5
       }
     }
   },
@@ -113,7 +113,6 @@
     "targetDiameterCm": 1.2,
     "targetColor": "#FFD60A",
     "backgroundColor": "#000000",
-    "storageFile": "gaze-calibration.json",
     "maxAcceptableErrorCm": 1.5,
     "dumpSamples": true,
     "secondPose": {
@@ -128,8 +127,7 @@
     "headCompensation": {
       "enabled": true,
       "lambda": 0.01
-    },
-    "autoLoad": true
+    }
   },
   "gazeCircle": {
     "enabled": true,
@@ -146,6 +144,18 @@
     "rawGhostBorderColor": "rgba(255,255,255,0.35)"
   },
   "gazeConfirm": {
+    "driftCheck": {
+      "enabled": true,
+      "points": [[0.5, 0.1], [0.12, 0.9], [0.88, 0.9]],
+      "firstWarmupMs": 1200,
+      "warmupMs": 700,
+      "dwellMs": 1000,
+      "minSamples": 8,
+      "maxSpreadCm": 2.0,
+      "minCorrectionCm": 0.4,
+      "maxCorrectionCm": 3.0,
+      "maxRounds": 2
+    },
     "dwellMs": 900,
     "stabilityRadiusCm": 1.2,
     "releaseRadiusCm": 2.0,
@@ -165,14 +175,13 @@
     "matchToleranceCm": 1.0,
     "pollIntervalMs": 40,
     "showProgress": true,
-    "showGazeCircle": true,
+    "showGazeCircle": false,
     "showCapturedPoints": true,
     "requireCalibration": true,
     "maxAttempts": 3,
     "attemptTimeoutMs": 60000,
     "allowUndo": false,
     "allowReset": true,
-    "saveSessionCalibration": true,
     "logPoints": true
   }
 }

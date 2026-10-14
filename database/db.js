@@ -31,23 +31,20 @@ export async function initDb(db) {
       UNIQUE (user_id, point_index)
     );
 
-    CREATE TABLE IF NOT EXISTS Calibrations (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      model TEXT NOT NULL,
-      coef_x TEXT NOT NULL,
-      coef_y TEXT NOT NULL,
-      rmse_cm REAL,
-      max_cm REAL,
-      sample_count INTEGER,
-      distance_cm REAL,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (user_id) REFERENCES Users(id) ON DELETE CASCADE
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_calibrations_user
-      ON Calibrations (user_id, created_at DESC);
+    -- Calibration is NOT stored: every registration and every login runs a
+    -- full calibration of its own. Older installs had a Calibrations table;
+    -- it is removed so no calibration data stays on the device.
+    DROP INDEX IF EXISTS idx_calibrations_user;
+    DROP TABLE IF EXISTS Calibrations;
   `);
+
+  // Older versions also kept the last calibration in a JSON file. Remove it.
+  try {
+    const legacy = new File(Paths.document, 'gaze-calibration.json');
+    if (legacy.exists) legacy.delete();
+  } catch (e) {
+    console.warn('[db] could not remove the old calibration file', e);
+  }
 }
 
 /**
@@ -127,69 +124,6 @@ export async function savePoints(db, userId, points) {
       );
     }
   });
-}
-
-/**
- * Saves a fitted calibration for a user.
- *
- * Rows are kept rather than overwritten: each login/registration can produce a
- * new fit, and the history is what lets you show accuracy drift over time in
- * the evaluation. `getUserCalibration` always returns the newest.
- *
- * The coefficient arrays are stored as JSON text — SQLite has no array type,
- * and the length varies with the model (3 per axis for affine, 6 for quadratic).
- */
-export async function saveUserCalibration(db, userId, calibration, quality = null) {
-  const result = await db.runAsync(
-    `INSERT INTO Calibrations
-       (user_id, model, coef_x, coef_y, rmse_cm, max_cm, sample_count, distance_cm)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    userId,
-    calibration.model,
-    JSON.stringify(calibration.coefX),
-    JSON.stringify(calibration.coefY),
-    quality?.rmseCm ?? null,
-    quality?.maxCm ?? null,
-    quality?.sampleCount ?? calibration.sampleCount ?? null,
-    quality?.distanceCm ?? null
-  );
-  return result.lastInsertRowId;
-}
-
-/**
- * Returns a user's most recent calibration in the shape the gaze mapping
- * expects ({ model, coefX, coefY }), or null if they have never calibrated.
- */
-export async function getUserCalibration(db, userId) {
-  const row = await db.getFirstAsync(
-    'SELECT * FROM Calibrations WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 1',
-    userId
-  );
-  if (!row) return null;
-
-  try {
-    return {
-      model: row.model,
-      coefX: JSON.parse(row.coef_x),
-      coefY: JSON.parse(row.coef_y),
-      rmseCm: row.rmse_cm,
-      maxCm: row.max_cm,
-      sampleCount: row.sample_count,
-      distanceCm: row.distance_cm,
-      createdAt: row.created_at,
-    };
-  } catch {
-    return null;
-  }
-}
-
-/** Full calibration history for a user — useful for the drift analysis. */
-export async function getUserCalibrationHistory(db, userId) {
-  return db.getAllAsync(
-    `SELECT id, model, rmse_cm, max_cm, sample_count, distance_cm, created_at
-     FROM Calibrations WHERE user_id = ? ORDER BY created_at DESC, id DESC`,
-    userId
-  );
 }
 
 /**

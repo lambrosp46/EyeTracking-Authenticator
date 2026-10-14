@@ -1,4 +1,5 @@
-import { StyleSheet, View, Text, TouchableOpacity } from 'react-native';
+import { Alert, StyleSheet, View, Text, TouchableOpacity } from 'react-native';
+import { shareSessionLog } from '../utils/sessionLog';
 import React from 'react';
 
 export default function HomeScreen( { navigation } ) {
@@ -16,6 +17,13 @@ export default function HomeScreen( { navigation } ) {
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.button} onPress={() => navigation.navigate('Test Eye Tracker')}>
                     <Text style={styles.buttonText}>Test Eye Tracker</Text>
+                </TouchableOpacity>
+                {/* Sends this launch's full log file (AirDrop, Files, Mail...). */}
+                <TouchableOpacity
+                    style={styles.button}
+                    onPress={() => shareSessionLog().catch((e) => Alert.alert('Logs', e.message))}
+                >
+                    <Text style={styles.buttonText}>Αποστολή logs</Text>
                 </TouchableOpacity>
             </View>
         </View>

@@ -11,6 +11,10 @@ import LoginScreen from './screens/LoginScreen';
 import RegisterScreen from './screens/RegisterScreen';
 import AuthPointsScreen from './screens/AuthPointsScreen';
 import GazeTestScreen from './screens/GazeTestScreen';
+import { installSessionLog } from './utils/sessionLog';
+
+// Every console line also goes to a file on the phone (see utils/sessionLog.js).
+installSessionLog();
 
 const Stack = createNativeStackNavigator();
 

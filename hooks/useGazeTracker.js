@@ -18,7 +18,6 @@ import {
   screenGeometry,
   smoothMetrics,
 } from '../utils/headPose';
-import { loadCalibration, saveCalibration, clearCalibration } from '../utils/calibrationStore';
 
 const OFFSCREEN = -9999;
 
@@ -82,6 +81,9 @@ export function useGazeTracker(options = {}) {
   // the pose the calibration was made in (calibration.pose). Off by default;
   // screens switch it on for the stretch where accuracy matters (login gaze,
   // accuracy check) via setPoseLockActive.
+  // Drift correction measured by the drift check (GazePointConfirm): a
+  // constant offset, in screen points, subtracted from every mapped sample.
+  const driftRef = useRef(null);
   const poseLockActiveRef = useRef(false);
   const poseLockRef = useRef({ locked: false, okSince: null, since: 0, smoothed: null });
   const [poseLock, setPoseLockState] = useState({ locked: false, issue: null });
@@ -140,9 +142,11 @@ export function useGazeTracker(options = {}) {
       // raw (uncalibrated) point, always computed so the debug ghost has something
       const raw = rawToScreenPoints(sample.sx, sample.sy, cfg.screen, window);
 
-      const mapped = calibrationRef.current
+      const fitted = calibrationRef.current
         ? applyCalibration(calibrationRef.current, sample.sx, sample.sy, sample)
         : raw;
+      const drift = driftRef.current;
+      const mapped = drift ? { x: fitted.x - drift.dx, y: fitted.y - drift.dy } : fitted;
 
       const smoothed = filterRef.current.filter(mapped.x, mapped.y, sample.timestamp);
       const final = validity.clampToScreen ? clampToScreen(smoothed, window) : smoothed;
@@ -379,30 +383,27 @@ export function useGazeTracker(options = {}) {
   }, []);
 
   // ---------------------------------------------------------------- MARK: calibration
-  useEffect(() => {
-    if (!settings.calibration.autoLoad) return;
-    let alive = true;
-    loadCalibration().then((c) => {
-      if (alive && c) {
-        calibrationRef.current = c;
-        setCalibrationState(c);
-      }
-    });
-    return () => { alive = false; };
+  // Calibration lives in memory only, for this screen's session. It is never
+  // written to or read from the device: every registration, login and test
+  // session starts with a calibration of its own.
+
+  /** Set (or clear with null) the drift correction {dx, dy} in screen points. */
+  const setDriftCorrection = useCallback((d) => {
+    driftRef.current = d && Number.isFinite(d.dx) && Number.isFinite(d.dy) ? { dx: d.dx, dy: d.dy } : null;
+    filterRef.current.reset();
   }, []);
 
-  const setCalibration = useCallback(async (c, { persist = true } = {}) => {
+  const setCalibration = useCallback(async (c) => {
+    driftRef.current = null; // a drift correction belongs to the calibration it was measured on
     calibrationRef.current = c;
     setCalibrationState(c);
     filterRef.current.reset();
-    if (persist) await saveCalibration(c);
   }, []);
 
   const resetCalibration = useCallback(async () => {
     calibrationRef.current = null;
     setCalibrationState(null);
     filterRef.current.reset();
-    await clearCalibration();
   }, []);
 
   /** Start buffering raw samples (used by the calibration overlay). */
@@ -440,6 +441,9 @@ export function useGazeTracker(options = {}) {
     sampleCountRef,
     readout,
     window,
+
+    // drift check (see GazePointConfirm)
+    setDriftCorrection,
 
     // pose lock (see updatePoseLock)
     poseLock,

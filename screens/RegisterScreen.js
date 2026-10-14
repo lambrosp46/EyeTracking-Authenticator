@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, TextInput, Image, TouchableOpacity, ScrollView, ActivityIndicator, Alert, Modal } from 'react-native';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
 import { useAuth } from '../hooks/useAuth';
@@ -11,6 +11,7 @@ import { getSaliencyMap, logSaliencyMapStats } from '../utils/saliency';
 import CalibrationOverlay from '../components/CalibrationOverlay';
 import GazePointConfirm from '../components/GazePointConfirm';
 import GazeCircle from '../components/GazeCircle';
+import PositionGuide from '../components/PositionGuide';
 import useGazeTracker from '../hooks/useGazeTracker';
 
 const { minScore: saliencyMinScore, maxHighSaliencyPoints } = settings.saliency;
@@ -46,8 +47,6 @@ export default function RegisterScreen({ navigation }) {
   //   'gaze'    -> look at the same points, in order
   const [pointsStage, setPointsStage] = useState('select');
   const [pendingPoints, setPendingPoints] = useState(null);
-  const [calibration, setCalibration] = useState(null);
-  const [calibrationQuality, setCalibrationQuality] = useState(null);
   const [gazeAttempts, setGazeAttempts] = useState(0);
   // CalibrationOverlay fires onComplete then onClose synchronously, so onClose
   // cannot read the stage state it just set. A ref sees the write immediately.
@@ -55,6 +54,18 @@ export default function RegisterScreen({ navigation }) {
   // Bumped to remount PointSelector (clearing its internal taps) whenever
   // we move between stages or restart after a mismatched confirmation.
   const [selectorKey, setSelectorKey] = useState(0);
+
+  // Pose lock during the gaze confirmation, exactly as at login: if the head
+  // leaves the calibration pose, gaze stops counting and the guide brings the
+  // user back. Refs keep the effect independent of the tracker's re-renders.
+  const trackerRef = useRef(tracker);
+  trackerRef.current = tracker;
+  useEffect(() => {
+    if (pointsStage !== 'gaze') return undefined;
+    trackerRef.current.setPoseLockActive(true);
+    return () => trackerRef.current.setPoseLockActive(false);
+  }, [pointsStage]);
+  const poseLocked = pointsStage === 'gaze' && tracker.poseLock?.locked && tracker.calibration?.pose;
 
   // Runs saliency analysis (Vision) right after the image is uploaded, then
   // opens the point-selection modal — with the saliency map ready in time
@@ -120,8 +131,8 @@ export default function RegisterScreen({ navigation }) {
     }, MODAL_SWAP_MS);
   };
 
-  // Calibration finished — keep the fit in memory (it is written to the DB
-  // only if the user actually completes registration) and move to gaze confirm.
+  // Calibration finished — the fit lives only in the tracker for this session
+  // (calibration is never stored) - move to gaze confirm.
   const handleCalibrationComplete = (result) => {
     console.log('[Register] calibration complete:', result?.quality?.rmseCm, 'cm');
     if (!result?.calibration) {
@@ -129,8 +140,6 @@ export default function RegisterScreen({ navigation }) {
       return;
     }
     calibrationDoneRef.current = true;
-    setCalibration(result.calibration);
-    setCalibrationQuality(result.quality ?? null);
     // Same modal-swap dance in reverse: the calibration modal has to finish
     // dismissing before the point modal can be presented again.
     setTimeout(() => {
@@ -251,7 +260,7 @@ export default function RegisterScreen({ navigation }) {
     }
 
     try {
-      await register(username, imageUri, points, calibration, calibrationQuality);
+      await register(username, imageUri, points);
       Alert.alert('Success', 'Registration saved.');
       navigation?.goBack?.();
     } catch (err) {
@@ -374,6 +383,20 @@ export default function RegisterScreen({ navigation }) {
         {pointsStage === 'gaze' && settings.gazeConfirm.showGazeCircle && (
           <GazeCircle position={tracker.position} visibility={tracker.visibility} />
         )}
+
+        {/* Inside the same Modal, so it covers the gaze screen. */}
+        {poseLocked && (
+          <View style={[StyleSheet.absoluteFill, styles.poseLockOverlay]}>
+            <SafeAreaProvider>
+              <PositionGuide
+                tracker={tracker}
+                reference={tracker.calibration.pose}
+                autoComplete={false}
+                onCancel={handleCancelPoints}
+              />
+            </SafeAreaProvider>
+          </View>
+        )}
       </Modal>
 
       <CalibrationOverlay
@@ -392,6 +415,10 @@ export default function RegisterScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
+  poseLockOverlay: {
+    backgroundColor: 'rgba(0,0,0,0.94)',
+    zIndex: 10,
+  },
   container: {
     flex: 1,
     backgroundColor: '#f9fafb',

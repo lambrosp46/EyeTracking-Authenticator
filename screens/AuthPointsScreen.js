@@ -15,7 +15,6 @@ import GazeCircle from '../components/GazeCircle';
 import GazePointConfirm from '../components/GazePointConfirm';
 import PositionGuide from '../components/PositionGuide';
 import useGazeTracker from '../hooks/useGazeTracker';
-import { useAuth } from '../hooks/useAuth';
 import { cropToStandardAspectRatio } from '../utils/imageAspect';
 import { pointsToCm } from '../utils/gazeMapping';
 import { pointsMatchPhysical } from '../utils/points';
@@ -52,7 +51,6 @@ export default function AuthPointsScreen({ route, navigation }) {
   const { username, userId, imageUri, storedPoints } = route.params;
 
   const tracker = useGazeTracker();
-  const { saveSessionCalibration } = useAuth();
 
   const [displayUri, setDisplayUri] = useState(null);
   const [stage, setStage] = useState('prepare');
@@ -81,6 +79,15 @@ export default function AuthPointsScreen({ route, navigation }) {
   const finishingRef = useRef(false);
 
   const toleranceCm = cfg.matchToleranceCm ?? settings.pointSelector.dotDiameterCm;
+
+  // Lifecycle logs: if a login ever stops early, these show where.
+  useEffect(() => {
+    console.log(`[GazeLogin] screen opened for "${username}" (user ${userId}, ${storedPoints?.length ?? 0} stored points)`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    console.log(`[GazeLogin] stage -> ${stage}`);
+  }, [stage]);
   const maxAttempts = cfg.maxAttempts ?? settings.authentication.maxAttempts;
 
   // Re-crop the stored image to the standard aspect ratio before showing it.
@@ -89,9 +96,15 @@ export default function AuthPointsScreen({ route, navigation }) {
   // that crop existed, whose points were normalised against a different box.
   useEffect(() => {
     let cancelled = false;
-    cropToStandardAspectRatio(imageUri).then((uri) => {
-      if (!cancelled) setDisplayUri(uri);
-    });
+    cropToStandardAspectRatio(imageUri)
+      .then((uri) => {
+        console.log('[GazeLogin] image ready');
+        if (!cancelled) setDisplayUri(uri);
+      })
+      .catch((e) => {
+        console.warn('[GazeLogin] image crop failed, using the original', e);
+        if (!cancelled) setDisplayUri(imageUri);
+      });
     return () => {
       cancelled = true;
     };
@@ -125,6 +138,7 @@ export default function AuthPointsScreen({ route, navigation }) {
     (async () => {
       setStatusText('Εκκίνηση eye tracking…');
       const ok = await trackerRef.current.start();
+      console.log('[GazeLogin] tracker.start ->', ok, 'error:', trackerRef.current.error);
       if (finishingRef.current) return;
 
       if (!ok) {
@@ -163,21 +177,13 @@ export default function AuthPointsScreen({ route, navigation }) {
         );
       }
 
-      // Every session's fit is kept, which is what makes the drift analysis
-      // possible later. A failure here must not block the login.
-      if (cfg.saveSessionCalibration && userId != null) {
-        saveSessionCalibration(userId, result.calibration, result.quality ?? null).catch((err) =>
-          console.warn('[GazeLogin] could not store session calibration', err)
-        );
-      }
-
       setTimeout(() => {
         if (finishingRef.current) return;
         settledRef.current = false;
         setStage('gaze');
       }, MODAL_SWAP_MS);
     },
-    [leave, saveSessionCalibration, userId]
+    [leave]
   );
 
   const failAttempt = useCallback(

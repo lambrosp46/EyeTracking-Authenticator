@@ -10,7 +10,14 @@ import {
 } from 'react-native';
 
 import settings from '../config/settings.json';
-import { cmToPoints } from '../utils/gazeMapping';
+import { cmToPoints, pointsToCm } from '../utils/gazeMapping';
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const median = (v) => {
+  const a = [...v].sort((x, y) => x - y);
+  const m = Math.floor(a.length / 2);
+  return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+};
 
 // These MUST match PointSelector's sizing exactly. PointSelector sizes its box
 // to the image's true aspect ratio so the image fills it edge to edge, and
@@ -65,6 +72,21 @@ export default function GazePointConfirm({
   const [dwellProgress, setDwellProgress] = useState(0);
   const [armed, setArmed] = useState(true);
 
+  // ---- drift check -------------------------------------------------------
+  // Before any point is captured, the user looks at a few fixed, neutral dots
+  // (the same for everyone, unrelated to the password). Their mean landing
+  // offset - measured NOW, in the pose the points will be looked at in - is
+  // subtracted from all gaze until this screen closes. It catches whatever
+  // shifted the mapping since calibration: a pose change, ARKit drift, or an
+  // over-eager head-pose correction (pilot: a uniform 2.2 cm shift).
+  const driftCfg = cfg.driftCheck ?? {};
+  const useDrift = driftCfg.enabled === true && typeof tracker.setDriftCorrection === 'function';
+  const [driftPhase, setDriftPhase] = useState(useDrift ? 'pending' : 'done'); // pending | running | done
+  const [driftDot, setDriftDot] = useState(null); // { nx, ny, n, total, collecting }
+  const trackerRef = useRef(tracker);
+  trackerRef.current = tracker;
+  const imageRectRef = useRef(null);
+
   const imageRef = useRef(null);
   const bufferRef = useRef([]);
   const lastCaptureRef = useRef(null);
@@ -92,6 +114,108 @@ export default function GazePointConfirm({
       }
     );
   }, [imageUri]);
+
+  useEffect(() => {
+    imageRectRef.current = imageRect;
+  }, [imageRect]);
+
+  // Runs once per mount. Deliberately NOT keyed on driftPhase: setting it to
+  // 'running' would otherwise trigger this effect's cleanup and cancel the check.
+  const driftStartedRef = useRef(false);
+  useEffect(() => {
+    if (!useDrift || !imageRect || driftStartedRef.current) return undefined;
+    driftStartedRef.current = true;
+    let cancelled = false;
+    const t = trackerRef.current;
+
+    (async () => {
+      // the image rect must have settled, like for normal captures
+      while (!cancelled && stableCountRef.current < 2) await wait(100);
+      if (cancelled) return;
+      setDriftPhase('running');
+      t.setDriftCorrection(null); // measure the uncorrected mapping
+
+      const points = driftCfg.points ?? [[0.5, 0.1], [0.12, 0.9], [0.88, 0.9]];
+      const rounds = driftCfg.maxRounds ?? 2;
+      let applied = null;
+
+      for (let round = 1; round <= rounds && !cancelled; round++) {
+        const offsets = [];
+        for (let i = 0; i < points.length && !cancelled; i++) {
+          const [nx, ny] = points[i];
+          setDriftDot({ nx, ny, n: i + 1, total: points.length, collecting: false });
+          // The first dot appears with the screen: the eye needs longer to find it.
+          await wait(i === 0 ? (driftCfg.firstWarmupMs ?? 1200) : (driftCfg.warmupMs ?? 700));
+          if (cancelled) return;
+          setDriftDot({ nx, ny, n: i + 1, total: points.length, collecting: true });
+          t.beginCollect();
+          await wait(driftCfg.dwellMs ?? 1000);
+          const samples = t.endCollect();
+          const rect = imageRectRef.current;
+          if (!rect || samples.length < (driftCfg.minSamples ?? 8)) {
+            offsets.push(null);
+            continue;
+          }
+          const tx = rect.x + nx * rect.width;
+          const ty = rect.y + ny * rect.height;
+          offsets.push({ dx: median(samples.map((p) => p.x)) - tx, dy: median(samples.map((p) => p.y)) - ty });
+        }
+        if (cancelled) return;
+
+        const ok = offsets.filter(Boolean);
+        const lastRound = round === rounds;
+        let spreadCm = Infinity;
+        if (ok.length === points.length) {
+          spreadCm = 0;
+          for (const a of ok) for (const b of ok) spreadCm = Math.max(spreadCm, pointsToCm(Math.hypot(a.dx - b.dx, a.dy - b.dy)));
+        }
+        const fmt = (o) => (o ? `(${pointsToCm(o.dx).toFixed(2)}, ${pointsToCm(o.dy).toFixed(2)})` : '(no samples)');
+        console.log(
+          `[DriftCheck] round ${round}: offsets cm ${offsets.map(fmt).join(' ')} · spread ${Number.isFinite(spreadCm) ? spreadCm.toFixed(2) : '-'}cm`
+        );
+        // The dots must agree with each other: if they don't, the user probably
+        // wasn't looking at one of them, and the mean would be a guess.
+        if (spreadCm <= (driftCfg.maxSpreadCm ?? 2.0)) {
+          let dx = ok.reduce((a, o) => a + o.dx, 0) / ok.length;
+          let dy = ok.reduce((a, o) => a + o.dy, 0) / ok.length;
+          // A small mean offset is just the normal per-point error of the fit
+          // (~0.5-1 cm, different at each spot); "correcting" it moves some
+          // points closer and others further. Only a clear common shift is fixed.
+          if (pointsToCm(Math.hypot(dx, dy)) < (driftCfg.minCorrectionCm ?? 0.4)) {
+            console.log(`[DriftCheck] shift ${pointsToCm(Math.hypot(dx, dy)).toFixed(2)}cm is within normal error - no correction needed`);
+            applied = null;
+            break;
+          }
+          const maxPts = cmToPoints(driftCfg.maxCorrectionCm ?? 3);
+          const mag = Math.hypot(dx, dy);
+          if (mag > maxPts) {
+            dx *= maxPts / mag;
+            dy *= maxPts / mag;
+          }
+          applied = { dx, dy };
+          break;
+        }
+        if (lastRound) console.log('[DriftCheck] dots disagreed - continuing WITHOUT correction');
+      }
+      if (cancelled) return;
+
+      t.setDriftCorrection(applied);
+      if (applied) {
+        console.log(`[DriftCheck] applied correction dx ${pointsToCm(-applied.dx).toFixed(2)}cm dy ${pointsToCm(-applied.dy).toFixed(2)}cm`);
+      }
+      setDriftDot(null);
+      setDriftPhase('done');
+    })();
+
+    return () => {
+      cancelled = true;
+      t.endCollect();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [useDrift, imageRect != null]);
+
+  // The correction belongs to this screen only.
+  useEffect(() => () => trackerRef.current.setDriftCorrection?.(null), []);
 
   const stabilityRadius = cmToPoints(cfg.stabilityRadiusCm);
   const releaseRadius = cmToPoints(cfg.releaseRadiusCm);
@@ -165,6 +289,7 @@ export default function GazePointConfirm({
 
   useEffect(() => {
     if (!imageRect) return undefined;
+    if (driftPhase !== 'done') return undefined; // no captures during the drift check
     if (captured.length >= expectedCount) return undefined;
 
     const id = setInterval(() => {
@@ -218,7 +343,7 @@ export default function GazePointConfirm({
     }, cfg.pollIntervalMs);
 
     return () => clearInterval(id);
-  }, [cfg, imageRect, captured.length, armed, expectedCount, commit, releaseRadius, stabilityRadius, tracker]);
+  }, [cfg, imageRect, captured.length, armed, expectedCount, commit, releaseRadius, stabilityRadius, tracker, driftPhase]);
 
   const undo = () => {
     const next = capturedRef.current.slice(0, -1);
@@ -245,7 +370,9 @@ export default function GazePointConfirm({
         {title ?? 'Κοίτα τα σημεία σου με τη σειρά'}
       </Text>
       <Text style={styles.subtitle}>
-        {subtitle ??
+        {driftPhase !== 'done'
+          ? `Γρήγορος έλεγχος: κοίτα την κίτρινη κουκκίδα${driftDot ? ` (${driftDot.n}/${driftDot.total})` : ''}`
+          : subtitle ??
           (armed
             ? `Κράτησε το βλέμμα σου σταθερό (${captured.length + 1}/${expectedCount})`
             : 'Κοίτα αλλού για το επόμενο σημείο')}
@@ -266,6 +393,24 @@ export default function GazePointConfirm({
         {!imageRect && (
           <View style={styles.overlayCentre}>
             <ActivityIndicator />
+          </View>
+        )}
+
+        {driftDot && imageRect && (
+          <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+            <View style={[StyleSheet.absoluteFill, styles.driftDim]} />
+            <View
+              style={[
+                styles.driftDot,
+                {
+                  left: driftDot.nx * boxSize.width - DRIFT_DOT / 2,
+                  top: driftDot.ny * boxSize.height - DRIFT_DOT / 2,
+                  backgroundColor: driftDot.collecting ? '#FFD60A' : 'transparent',
+                },
+              ]}
+            >
+              <View style={[styles.driftCore, { backgroundColor: driftDot.collecting ? '#000' : '#FFD60A' }]} />
+            </View>
           </View>
         )}
 
@@ -318,7 +463,15 @@ export default function GazePointConfirm({
   );
 }
 
+const DRIFT_DOT = cmToPoints(1.2);
+
 const styles = StyleSheet.create({
+  driftDim: { backgroundColor: 'rgba(0,0,0,0.55)' },
+  driftDot: {
+    position: 'absolute', width: DRIFT_DOT, height: DRIFT_DOT, borderRadius: DRIFT_DOT / 2,
+    borderWidth: 2, borderColor: '#FFD60A', alignItems: 'center', justifyContent: 'center',
+  },
+  driftCore: { width: 4, height: 4, borderRadius: 2 },
   root: { flex: 1, backgroundColor: '#fff' },
   title: { fontSize: 18, fontWeight: '700', textAlign: 'center', marginTop: 12, color: '#111827' },
   subtitle: { fontSize: 14, textAlign: 'center', marginTop: 4, marginBottom: 12, color: '#6b7280' },

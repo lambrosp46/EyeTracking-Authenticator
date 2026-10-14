@@ -13,6 +13,7 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 import settings from '../config/settings.json';
 import PositionGuide from './PositionGuide';
+import { writeToLogFile } from '../utils/sessionLog';
 import { hasReferencePose, headMetrics, screenGeometry } from '../utils/headPose';
 import { pointsToCm } from '../utils/gazeMapping';
 import {
@@ -94,10 +95,16 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
   );
   const [pose2Target, setPose2Target] = useState(null);
   const pose2ResolveRef = useRef(null);
+  // After the second pose the user must go BACK to the first one: the pose
+  // lock and the fit's centre are the first pose, and users otherwise simply
+  // stay in the second pose for the rest of the session (seen in the pilot:
+  // +1.2 cm / +4° carried into the gaze confirmation).
+  const [returnTarget, setReturnTarget] = useState(null);
+  const returnResolveRef = useRef(null);
 
   const [index, setIndex] = useState(0);
   const [current, setCurrent] = useState(null);
-  const [phase, setPhase] = useState(usePositioning ? 'position' : 'intro'); // position | intro | warmup | collect | pose2 | computing | result
+  const [phase, setPhase] = useState(usePositioning ? 'position' : 'intro'); // position | intro | warmup | collect | pose2 | return | computing | result
   const [result, setResult] = useState(null);
   const [failure, setFailure] = useState(null);
   // false while the positioning step still has to run for this opening.
@@ -152,6 +159,7 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
     setResult(null);
     setFailure(null);
     setPose2Target(null);
+    setReturnTarget(null);
 
     if (!positioned) {
       setPhase('position'); // PositionGuide calls handlePositioned -> this effect runs again
@@ -225,6 +233,20 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
         } else {
           console.log('[Calibration] second pose skipped, fitting on the first pose only');
         }
+
+        // ---- back to the first pose ----------------------------------
+        // Strict pose-lock limits (no `compensated` flag on this reference).
+        setReturnTarget(poseA);
+        setPhase('return');
+        const back = await new Promise((resolve) => {
+          returnResolveRef.current = resolve;
+        });
+        returnResolveRef.current = null;
+        if (cancelledRef.current) return;
+        console.log(
+          `[Calibration] back to first pose ${back?.skipped ? 'SKIPPED' : 'ok'} after ${back?.timeToPositionMs ?? '-'}ms` +
+            (back?.pitchDeg != null ? `: pitch ${back.pitchDeg.toFixed(1)}° (first pose ${poseA.pitchDeg.toFixed(1)}°)` : '')
+        );
       }
 
       setPhase('computing');
@@ -292,6 +314,7 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
     return () => {
       cancelledRef.current = true;
       pose2ResolveRef.current?.(null);
+      returnResolveRef.current?.(null);
       tracker.endCollect();
       tracker.setPoseLockActive(lockWasActive);
     };
@@ -327,11 +350,24 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
     <Modal visible={visible} animationType="fade" presentationStyle="fullScreen" onRequestClose={onClose}>
       <SafeAreaProvider>
         <View style={[styles.root, { backgroundColor: cfg.backgroundColor }]}>
-          {phase === 'position' && (
+          {/* `visible &&`: on close the phase is reset to 'position' while the
+              modal is still fading out - without this the guide flashes up. */}
+          {visible && phase === 'position' && (
             <PositionGuide tracker={tracker} onReady={handlePositioned} onCancel={onClose} reference={reference} />
           )}
 
-          {phase === 'pose2' && pose2Target && (
+          {visible && phase === 'return' && returnTarget && (
+            <PositionGuide
+              tracker={tracker}
+              reference={returnTarget}
+              onReady={(snap) => returnResolveRef.current?.(snap)}
+              onCancel={onClose}
+              title="Επιστροφή στην αρχική στάση"
+              subtitle="Σήκωσε ξανά το κεφάλι όπως ήταν στην αρχή της βαθμονόμησης. Συνεχίζουμε μόλις το πλαίσιο γίνει πράσινο."
+            />
+          )}
+
+          {visible && phase === 'pose2' && pose2Target && (
             <PositionGuide
               tracker={tracker}
               reference={pose2Target}
@@ -343,7 +379,7 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
             />
           )}
 
-          {phase !== 'result' && phase !== 'position' && phase !== 'pose2' && (
+          {phase !== 'result' && phase !== 'position' && phase !== 'pose2' && phase !== 'return' && (
             <>
               <Animated.View
                 style={[
@@ -513,11 +549,13 @@ function dumpCalibrationData(mode, window, targets, samples, positioning) {
   const rows = samples.map((s) => keys.map((k) => round(s[k])));
   const CHUNK = 40;
   const parts = Math.ceil(rows.length / CHUNK);
-  console.log(`[CalibrationData] meta ${JSON.stringify(meta)}`);
+  // To the log FILE only: these lines are large and were flooding Metro.
+  writeToLogFile(`[CalibrationData] meta ${JSON.stringify(meta)}`);
   for (let i = 0; i < parts; i++) {
-    console.log(`[CalibrationData] rows ${i + 1}/${parts} ${JSON.stringify(rows.slice(i * CHUNK, (i + 1) * CHUNK))}`);
+    writeToLogFile(`[CalibrationData] rows ${i + 1}/${parts} ${JSON.stringify(rows.slice(i * CHUNK, (i + 1) * CHUNK))}`);
   }
-  console.log('[CalibrationData] end');
+  writeToLogFile('[CalibrationData] end');
+  console.log(`[CalibrationData] ${samples.length} samples written to the session log file`);
 }
 
 /** Arrow for the direction a point lands relative to its target (screen: +x right, +y down). */
