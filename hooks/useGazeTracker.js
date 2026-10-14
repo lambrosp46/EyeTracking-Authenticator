@@ -7,11 +7,30 @@ import { GazeFilter2D } from '../utils/oneEuroFilter';
 import {
   applyCalibration,
   clampToScreen,
+  pointsToCm,
   rawToScreenPoints,
 } from '../utils/gazeMapping';
+import {
+  evaluatePositioning,
+  hasReferencePose,
+  headMetrics,
+  referenceConfig,
+  screenGeometry,
+  smoothMetrics,
+} from '../utils/headPose';
 import { loadCalibration, saveCalibration, clearCalibration } from '../utils/calibrationStore';
 
 const OFFSCREEN = -9999;
+
+/** Native sample fields copied into calibration samples, for the data dump. */
+export const RAW_EXTRAS = [
+  'leftSx', 'leftSy', 'rightSx', 'rightSy', 'altSx', 'altSy',
+  'blinkLeft', 'blinkRight',
+  'lookUpL', 'lookUpR', 'lookDownL', 'lookDownR', 'lookInL', 'lookInR',
+  'lookOutL', 'lookOutR', 'squintL', 'squintR', 'wideL', 'wideR',
+  'distanceCm', 'headXCm', 'headYCm', 'headZCm', 'faceDirX', 'faceDirY', 'faceDirZ', 'headRollDeg',
+  'deviceTiltDeg', 'interEyeCm',
+];
 
 /**
  * Owns one ARKit gaze session.
@@ -50,12 +69,39 @@ export function useGazeTracker(options = {}) {
   const calibrationRef = useRef(null);
   const collectingRef = useRef(null);
   const latestRef = useRef(null);
+  // Latest head/device pose, kept apart from latestRef because it is needed even
+  // when the gaze sample itself is invalid (that is when the positioning guide
+  // matters most). { sample, receivedAt } or null when no face is in view.
+  const headRef = useRef(null);
+  // Last raw sample of any kind, plus a counter - for diagnostics only
+  // (lets the positioning screen tell "no samples" from "samples without pose").
+  const lastSampleRef = useRef(null);
+  const sampleCountRef = useRef(0);
+  const lastPoseLogRef = useRef(0);
+  // Pose lock: while active, gaze samples count only if the head is still in
+  // the pose the calibration was made in (calibration.pose). Off by default;
+  // screens switch it on for the stretch where accuracy matters (login gaze,
+  // accuracy check) via setPoseLockActive.
+  const poseLockActiveRef = useRef(false);
+  const poseLockRef = useRef({ locked: false, okSince: null, since: 0, smoothed: null });
+  const [poseLock, setPoseLockState] = useState({ locked: false, issue: null });
+  const geom = useMemo(() => screenGeometry(cfg.screen, window, pointsToCm), [window, cfg.screen]);
   const lastReadoutRef = useRef(0);
   const rateRef = useRef({ count: 0, since: 0, hz: 0 });
 
   // ---------------------------------------------------------------- MARK: sample
   const handleSample = useCallback(
     (sample) => {
+      lastSampleRef.current = sample;
+      sampleCountRef.current += 1;
+
+      // Head pose first, before any validity check can return early.
+      if (sample.headZCm != null) {
+        headRef.current = sample.isTracked ? { sample, receivedAt: Date.now() } : null;
+        logPoseDrift(sample);
+      }
+      const poseBlocked = updatePoseLock(sample);
+
       // sampling rate, useful to confirm the native throttle is behaving
       const rate = rateRef.current;
       rate.count += 1;
@@ -80,7 +126,7 @@ export function useGazeTracker(options = {}) {
       const eyesOk = validity.requireBothEyes ? sample.eyesOpen : sample.hasHit;
 
       const valid =
-        sample.isTracked && sample.hasHit && eyesOk && distanceOk && disparityOk;
+        sample.isTracked && sample.hasHit && eyesOk && distanceOk && disparityOk && !poseBlocked;
 
       if (!valid) {
         visibility.setValue(0);
@@ -95,7 +141,7 @@ export function useGazeTracker(options = {}) {
       const raw = rawToScreenPoints(sample.sx, sample.sy, cfg.screen, window);
 
       const mapped = calibrationRef.current
-        ? applyCalibration(calibrationRef.current, sample.sx, sample.sy)
+        ? applyCalibration(calibrationRef.current, sample.sx, sample.sy, sample)
         : raw;
 
       const smoothed = filterRef.current.filter(mapped.x, mapped.y, sample.timestamp);
@@ -118,13 +164,16 @@ export function useGazeTracker(options = {}) {
       };
 
       if (collectingRef.current) {
-        collectingRef.current.push({
+        const kept = {
           sx: sample.sx,
           sy: sample.sy,
           x: final.x,
           y: final.y,
           timestamp: sample.timestamp,
-        });
+        };
+        // Raw extras for the calibration data dump (offline model comparison).
+        for (const key of RAW_EXTRAS) if (sample[key] != null) kept[key] = sample[key];
+        collectingRef.current.push(kept);
       }
 
       maybePublishReadout(sample, final, true);
@@ -133,6 +182,83 @@ export function useGazeTracker(options = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [window.width, window.height, onSampleCallback]
   );
+
+  // Once a second: how far the head has moved since the calibration was fitted.
+  // A calibration only holds for the pose it was made in, so this is the first
+  // thing to look at when the cursor lands off target. Pose only - no gaze.
+  const logPoseDrift = (sample) => {
+    const ref = calibrationRef.current?.pose;
+    if (!settings.positioning?.logDiagnostics || !ref || ref.distanceCm == null) return;
+    const now = Date.now();
+    if (now - lastPoseLogRef.current < (settings.positioning.logIntervalMs ?? 1000)) return;
+    lastPoseLogRef.current = now;
+    const m = headMetrics(sample, geom);
+    if (!m) return;
+    const d = (a, b, digits = 1) => {
+      const v = a - b;
+      return `${v >= 0 ? '+' : ''}${v.toFixed(digits)}`;
+    };
+    console.log(
+      `[PoseDrift] since calibration: d ${d(m.distanceCm, ref.distanceCm)}cm` +
+        ` x ${d(m.eyeXFromCenterCm, ref.eyeXFromCenterCm)}cm y ${d(m.eyeYFromTopCm, ref.eyeYFromTopCm)}cm` +
+        ` · yaw ${d(m.yawDeg, ref.yawDeg, 0)}° pitch ${d(m.pitchDeg, ref.pitchDeg, 0)}° roll ${d(m.rollDeg, ref.rollDeg, 0)}°` +
+        (m.deviceTiltDeg != null && ref.deviceTiltDeg != null
+          ? ` · tilt ${d(m.deviceTiltDeg, ref.deviceTiltDeg, 0)}°`
+          : '')
+    );
+  };
+
+  /**
+   * Returns true while the pose lock is engaged (= this sample must not count).
+   *
+   * Hysteresis, deliberately asymmetric: the lock ENGAGES only when the pose
+   * leaves the widened (exit) limits, and RELEASES only after the pose has been
+   * back inside the strict (entry) limits for poseLock.holdStillMs. So sensor
+   * noise near the edge does not toggle it.
+   */
+  const updatePoseLock = (sample) => {
+    const lockCfg = settings.positioning?.poseLock;
+    const ref = calibrationRef.current?.pose;
+    if (!poseLockActiveRef.current || !lockCfg?.enabled || !hasReferencePose(calibrationRef.current)) return false;
+
+    const st = poseLockRef.current;
+    const m = sample.isTracked && sample.headZCm != null ? headMetrics(sample, geom) : null;
+    st.smoothed = m ? smoothMetrics(st.smoothed, m, settings.positioning.smoothing ?? 1) : null;
+    const rcfg = referenceConfig(settings.positioning, ref);
+    const now = Date.now();
+
+    if (!st.locked) {
+      const v = evaluatePositioning(st.smoothed, rcfg, true);
+      if (!v.ok) {
+        st.locked = true;
+        st.since = now;
+        st.okSince = null;
+        setPoseLockState({ locked: true, issue: v.primary });
+        if (settings.positioning.logDiagnostics) console.log(`[PoseLock] locked: ${v.issues.join(',')}`);
+      }
+    } else {
+      const v = evaluatePositioning(st.smoothed, rcfg, false);
+      if (!v.ok) {
+        st.okSince = null;
+      } else {
+        if (st.okSince == null) st.okSince = now;
+        if (now - st.okSince >= rcfg.holdStillMs) {
+          st.locked = false;
+          setPoseLockState({ locked: false, issue: null });
+          if (settings.positioning.logDiagnostics) console.log(`[PoseLock] released after ${now - st.since}ms`);
+        }
+      }
+    }
+    return st.locked;
+  };
+
+  /** Switch the pose lock on/off. Always starts unlocked. */
+  const setPoseLockActive = useCallback((on) => {
+    poseLockActiveRef.current = !!on;
+    poseLockRef.current = { locked: false, okSince: null, since: 0, smoothed: null };
+    setPoseLockState({ locked: false, issue: null });
+  }, []);
+  const isPoseLockActive = useCallback(() => poseLockActiveRef.current, []);
 
   const maybePublishReadout = useCallback((sample, point, valid) => {
     const now = Date.now();
@@ -160,10 +286,10 @@ export function useGazeTracker(options = {}) {
     const state = GazeTracker.addTrackingStateListener((e) => {
       switch (e.state) {
         case 'started': setStatus('searching'); setRunning(true); break;
-        case 'stopped': setStatus('idle'); setRunning(false); visibility.setValue(0); break;
+        case 'stopped': setStatus('idle'); setRunning(false); visibility.setValue(0); headRef.current = null; break;
         case 'faceFound': setStatus('tracking'); break;
-        case 'faceLost': setStatus('searching'); visibility.setValue(0); break;
-        case 'interrupted': setStatus('interrupted'); visibility.setValue(0); break;
+        case 'faceLost': setStatus('searching'); visibility.setValue(0); headRef.current = null; break;
+        case 'interrupted': setStatus('interrupted'); visibility.setValue(0); headRef.current = null; break;
         case 'resumed': setStatus('searching'); break;
         default: break;
       }
@@ -309,8 +435,16 @@ export function useGazeTracker(options = {}) {
     rawPosition,
     visibility,
     latestRef,
+    headRef,
+    lastSampleRef,
+    sampleCountRef,
     readout,
     window,
+
+    // pose lock (see updatePoseLock)
+    poseLock,
+    setPoseLockActive,
+    isPoseLockActive,
 
     // calibration
     calibration,

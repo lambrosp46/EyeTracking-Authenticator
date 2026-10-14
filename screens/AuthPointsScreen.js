@@ -13,6 +13,7 @@ import settings from '../config/settings.json';
 import CalibrationOverlay from '../components/CalibrationOverlay';
 import GazeCircle from '../components/GazeCircle';
 import GazePointConfirm from '../components/GazePointConfirm';
+import PositionGuide from '../components/PositionGuide';
 import useGazeTracker from '../hooks/useGazeTracker';
 import { useAuth } from '../hooks/useAuth';
 import { cropToStandardAspectRatio } from '../utils/imageAspect';
@@ -279,7 +280,18 @@ export default function AuthPointsScreen({ route, navigation }) {
     return () => clearTimeout(id);
   }, [stage, attemptKey]);
 
+  // Pose lock for the gaze pass: if the head leaves the pose the calibration
+  // was made in, the tracker stops counting gaze (no dwell can complete, for
+  // ANY point - nothing leaks about the password) and the guide below takes
+  // the user back. Released automatically once the pose is back.
+  useEffect(() => {
+    if (stage !== 'gaze') return undefined;
+    trackerRef.current.setPoseLockActive(true);
+    return () => trackerRef.current.setPoseLockActive(false);
+  }, [stage]);
+
   const gazeReady = stage === 'gaze' && displayUri;
+  const poseLocked = gazeReady && tracker.poseLock?.locked && tracker.calibration?.pose;
 
   return (
     <SafeAreaProvider>
@@ -321,6 +333,17 @@ export default function AuthPointsScreen({ route, navigation }) {
         <GazeCircle position={tracker.position} visibility={tracker.visibility} />
       )}
 
+      {poseLocked && (
+        <View style={[StyleSheet.absoluteFill, styles.poseLockOverlay]}>
+          <PositionGuide
+            tracker={tracker}
+            reference={tracker.calibration.pose}
+            autoComplete={false}
+            onCancel={() => leave(false)}
+          />
+        </View>
+      )}
+
       <CalibrationOverlay
         visible={stage === 'calibrate'}
         mode="calibrate"
@@ -337,6 +360,10 @@ export default function AuthPointsScreen({ route, navigation }) {
 }
 
 const styles = StyleSheet.create({
+  poseLockOverlay: {
+    backgroundColor: 'rgba(0,0,0,0.94)',
+    zIndex: 10,
+  },
   container: {
     flex: 1,
     backgroundColor: '#fff',

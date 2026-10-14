@@ -85,7 +85,7 @@ public class GazeTrackerModule: Module {
   }
 }
 
-internal final class FaceTrackingUnsupportedException: Exception {
+internal final class FaceTrackingUnsupportedException: Exception, @unchecked Sendable {
   override var reason: String {
     "ARFaceTrackingConfiguration is not supported on this device. A TrueDepth camera (iPhone X or newer) and a real device are required."
   }
@@ -124,6 +124,11 @@ final class GazeTracker: NSObject, ARSessionDelegate {
   private var lastFaceVisible: Bool? = nil
   private(set) var isRunning = false
 
+  /// Device orientation (world space) at the previous emitted sample, used to
+  /// derive how fast the phone is rotating. Reset on every start.
+  private var lastDeviceRotation: simd_float3x3? = nil
+  private var lastRotationTime: TimeInterval = 0
+
   init(
     onSample: @escaping ([String: Any]) -> Void,
     onState: @escaping ([String: Any]) -> Void,
@@ -147,16 +152,25 @@ final class GazeTracker: NSObject, ARSessionDelegate {
     lock.unlock()
   }
 
-  func start() {
-    guard !isRunning else { return }
+  /// One place for the session configuration, so a resumed session runs with
+  /// exactly the same settings as a fresh one. `.gravity` matters: it is what
+  /// makes the world y-axis point up, which the device tilt below relies on.
+  private func makeConfiguration() -> ARFaceTrackingConfiguration {
     let config = ARFaceTrackingConfiguration()
     config.isLightEstimationEnabled = false
     config.maximumNumberOfTrackedFaces = 1
     config.worldAlignment = .gravity
-    session.run(config, options: [.resetTracking, .removeExistingAnchors])
+    return config
+  }
+
+  func start() {
+    guard !isRunning else { return }
+    session.run(makeConfiguration(), options: [.resetTracking, .removeExistingAnchors])
     isRunning = true
     lastEmit = 0
     lastFaceVisible = nil
+    lastDeviceRotation = nil
+    lastRotationTime = 0
     onState(["state": "started", "isRunning": true])
   }
 
@@ -221,6 +235,30 @@ final class GazeTracker: NSObject, ARSessionDelegate {
       "hasHit": !hits.isEmpty
     ]
 
+    // The OTHER ray mode too, so both can be compared offline on the same data
+    // (altSx/altSy, same portrait axes and same open-eye rule as sx/sy).
+    let altMode = mode == "lookAtPoint" ? "eyeTransforms" : "lookAtPoint"
+    var altHits: [EyeHit] = []
+    if wantsLeft, leftOpen, let h = intersect(eye: face.leftEyeTransform, face: face, view: view, mode: altMode) { altHits.append(h) }
+    if wantsRight, rightOpen, let h = intersect(eye: face.rightEyeTransform, face: face, view: view, mode: altMode) { altHits.append(h) }
+    if !altHits.isEmpty {
+      let n = Float(altHits.count)
+      payload["altSx"] = altHits.reduce(Float(0)) { $0 + $1.point.y } / n
+      payload["altSy"] = altHits.reduce(Float(0)) { $0 + $1.point.x } / n
+    }
+
+    // Eye blend shapes. Eyelid opening follows vertical gaze closely, which is
+    // the axis ARKit's eye rotation gets worst - useful as extra fit features.
+    for (key, location) in GazeTracker.eyeShapes {
+      payload[key] = face.blendShapes[location]?.floatValue ?? 0
+    }
+
+    // Head and device pose. Computed whenever a face anchor exists, even when the
+    // gaze ray misses the screen, because the positioning guide needs them most
+    // exactly when the user is badly placed.
+    for (key, value) in headPose(face: face, view: view) { payload[key] = value }
+    for (key, value) in devicePose(camera: frame.camera.transform, time: now) { payload[key] = value }
+
     if let l = left {
       payload["leftSx"] = l.point.x
       payload["leftSy"] = l.point.y
@@ -265,10 +303,94 @@ final class GazeTracker: NSObject, ARSessionDelegate {
   func sessionInterruptionEnded(_ session: ARSession) {
     onState(["state": "resumed", "isRunning": isRunning])
     if isRunning {
-      let config = ARFaceTrackingConfiguration()
-      config.isLightEstimationEnabled = false
-      session.run(config, options: [.resetTracking, .removeExistingAnchors])
+      // Previously a bare configuration was used here, which silently dropped
+      // maximumNumberOfTrackedFaces and the gravity alignment after an interruption.
+      lastDeviceRotation = nil
+      session.run(makeConfiguration(), options: [.resetTracking, .removeExistingAnchors])
     }
+  }
+
+  // MARK: Head & device pose
+
+  private static let eyeShapes: [(String, ARFaceAnchor.BlendShapeLocation)] = [
+    ("lookUpL", .eyeLookUpLeft), ("lookUpR", .eyeLookUpRight),
+    ("lookDownL", .eyeLookDownLeft), ("lookDownR", .eyeLookDownRight),
+    ("lookInL", .eyeLookInLeft), ("lookInR", .eyeLookInRight),
+    ("lookOutL", .eyeLookOutLeft), ("lookOutR", .eyeLookOutRight),
+    ("squintL", .eyeSquintLeft), ("squintR", .eyeSquintRight),
+    ("wideL", .eyeWideLeft), ("wideR", .eyeWideRight),
+  ]
+
+  private static let radToDeg: Float = 180.0 / .pi
+
+  /// Where the head is and which way it faces, relative to the phone.
+  ///
+  /// Everything is expressed in the same portrait frame as `sx`/`sy`
+  /// (camera +Y = right, camera +X = down) so JS can relate it to the screen:
+  ///   headX/Y/ZCm  midpoint between the eyes: cm right of / below the lens,
+  ///                and distance in front of the screen plane
+  ///   faceDirX/Y/Z unit vector out of the face (where the nose points):
+  ///                right, down, and towards the screen (> 0 when facing it)
+  ///   headRollDeg  sideways tilt of the head relative to the phone, 0 = upright
+  /// Angles relative to the screen are derived in JS (utils/headPose.js),
+  /// because they need the screen size, which only JS knows.
+  private func headPose(face: ARFaceAnchor, view: simd_float4x4) -> [String: Any] {
+    let faceInCamera = view * face.transform
+    let leftEye = simd_make_float3((faceInCamera * face.leftEyeTransform).columns.3)
+    let rightEye = simd_make_float3((faceInCamera * face.rightEyeTransform).columns.3)
+    let mid = (leftEye + rightEye) * 0.5
+
+    // Face anchor axes: +Z out of the face, +Y up the face.
+    let forward = simd_normalize(simd_make_float3(faceInCamera.columns.2))
+    let up = simd_normalize(simd_make_float3(faceInCamera.columns.1))
+
+    // Upright head in a portrait phone: face-up = portrait-up = camera -X,
+    // i.e. up = (-1, 0, 0) -> roll 0. Positive = top of the head towards +right.
+    let rollDeg = atan2(up.y, -up.x) * GazeTracker.radToDeg
+
+    return [
+      "headXCm": mid.y * 100,
+      "headYCm": mid.x * 100,
+      "headZCm": -mid.z * 100,
+      "faceDirX": forward.y,
+      "faceDirY": forward.x,
+      "faceDirZ": forward.z,
+      "headRollDeg": rollDeg,
+      "interEyeCm": simd_distance(leftEye, rightEye) * 100,
+    ]
+  }
+
+  /// How the phone itself is held. With `.gravity` alignment the world y-axis is
+  /// "up", so the camera transform already carries the accelerometer/gyro fusion
+  /// ARKit does - no CoreMotion and no extra permission needed.
+  ///   deviceTiltDeg      angle of the screen normal above the horizon:
+  ///                      0 = phone upright, + = leaned back (screen facing up),
+  ///                      90 = lying flat face-up
+  ///   deviceRotationDps  how fast the phone is rotating, any axis, deg/s
+  private func devicePose(camera: simd_float4x4, time: TimeInterval) -> [String: Any] {
+    let c0 = simd_make_float3(camera.columns.0)
+    let c1 = simd_make_float3(camera.columns.1)
+    let c2 = simd_make_float3(camera.columns.2)
+
+    // The face sits at camera z < 0, so the screen normal towards the user is -Z.
+    // This only uses Z, which does not depend on the front camera's mirroring.
+    let normalTowardsUser = -simd_normalize(c2)
+    let tiltDeg = asin(max(-1, min(1, normalTowardsUser.y))) * GazeTracker.radToDeg
+
+    var payload: [String: Any] = ["deviceTiltDeg": tiltDeg]
+
+    let rotation = simd_float3x3(columns: (c0, c1, c2))
+    if let previous = lastDeviceRotation, time > lastRotationTime {
+      // Relative rotation R = Rprev^T * Rnow; its angle is acos((trace - 1) / 2).
+      let relative = simd_transpose(previous) * rotation
+      let trace = relative.columns.0.x + relative.columns.1.y + relative.columns.2.z
+      let angle = acos(max(-1, min(1, (trace - 1) / 2)))
+      payload["deviceRotationDps"] = angle * GazeTracker.radToDeg / Float(time - lastRotationTime)
+    }
+    lastDeviceRotation = rotation
+    lastRotationTime = time
+
+    return payload
   }
 
   // MARK: Geometry

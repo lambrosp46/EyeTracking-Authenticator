@@ -97,4 +97,25 @@ function unavailableMessage() {
  * @property {boolean} eyesOpen
  * @property {number} [eyesUsed]     How many eyes contributed to sx/sy.
  * @property {number} [eyeDisparityCm] Distance between the two per-eye hits.
+ *
+ * Head pose - sent whenever a face anchor exists, even if the gaze ray misses
+ * the screen. Same portrait frame as sx/sy (x right, y down, from the lens).
+ * @property {number} [headXCm]      Eye midpoint, cm right of the lens.
+ * @property {number} [headYCm]      Eye midpoint, cm below the lens.
+ * @property {number} [headZCm]      Eye midpoint, cm in front of the screen plane.
+ * @property {number} [faceDirX]     Unit vector out of the face: right component.
+ * @property {number} [faceDirY]     ... down component.
+ * @property {number} [faceDirZ]     ... towards-the-screen component (> 0 when facing it).
+ * @property {number} [headRollDeg]  Sideways head tilt relative to the phone, 0 = upright.
+ * @property {number} [interEyeCm]   Distance between the eye centres (sanity check, ~6 cm).
+ *
+ * Research extras (used by the calibration data dump):
+ * @property {number} [altSx]   sx computed with the OTHER rayMode (lookAtPoint <-> eyeTransforms).
+ * @property {number} [altSy]   sy, same.
+ * @property {number} lookUpL / lookUpR / lookDownL / lookDownR / lookInL / lookInR /
+ *           lookOutL / lookOutR / squintL / squintR / wideL / wideR   eye blend shapes 0..1
+ *
+ * Device pose - from ARKit's gravity-aligned camera transform.
+ * @property {number} [deviceTiltDeg]     0 = upright, + = leaned back, 90 = flat face-up.
+ * @property {number} [deviceRotationDps] Rotation speed of the phone, deg/s.
  */

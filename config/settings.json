@@ -54,11 +54,57 @@
       "clampToScreen": true
     }
   },
+  "positioning": {
+    "enabled": true,
+    "targetDistanceCm": 30,
+    "distanceToleranceCm": 3,
+    "targetEyeYFromTopCm": 2.5,
+    "eyeYToleranceCm": 3,
+    "eyeXToleranceCm": 3,
+    "maxHeadYawDeg": 10,
+    "maxHeadPitchDeg": 12,
+    "maxHeadRollDeg": 10,
+    "maxDeviceRotationDps": 20,
+    "deviceTilt": {
+      "mode": "hint",
+      "minDeg": -5,
+      "maxDeg": 35
+    },
+    "exitToleranceFactor": 1.5,
+    "holdStillMs": 1000,
+    "smoothing": 0.35,
+    "pollIntervalMs": 66,
+    "allowSkip": true,
+    "showDebug": true,
+    "logDiagnostics": true,
+    "logIntervalMs": 1000,
+    "poseLock": {
+      "enabled": true,
+      "distanceToleranceCm": 1.5,
+      "eyeXToleranceCm": 0.7,
+      "eyeYToleranceCm": 0.7,
+      "maxHeadYawDeg": 2,
+      "maxHeadPitchDeg": 2,
+      "maxHeadRollDeg": 3,
+      "maxDeviceRotationDps": 25,
+      "exitToleranceFactor": 1.5,
+      "holdStillMs": 600,
+      "compensated": {
+        "distanceToleranceCm": 2.5,
+        "eyeXToleranceCm": 1.2,
+        "eyeYToleranceCm": 1.2,
+        "maxHeadYawDeg": 3,
+        "maxHeadPitchDeg": 3.5,
+        "maxHeadRollDeg": 4
+      }
+    }
+  },
   "calibration": {
-    "model": "quadratic",
+    "model": "auto",
     "ridge": 1e-06,
-    "pattern": "9",
+    "pattern": "12",
     "customPoints": null,
+    "validationPoints": [[0.3, 0.3], [0.7, 0.3], [0.5, 0.5], [0.3, 0.7], [0.7, 0.7], [0.5, 0.2], [0.5, 0.8]],
     "marginPercent": 0.12,
     "warmupMs": 900,
     "dwellMs": 1200,
@@ -69,6 +115,20 @@
     "backgroundColor": "#000000",
     "storageFile": "gaze-calibration.json",
     "maxAcceptableErrorCm": 1.5,
+    "dumpSamples": true,
+    "secondPose": {
+      "enabled": true,
+      "pitchOffsetDeg": 3,
+      "pitchToleranceDeg": 1.5,
+      "eyeYToleranceCm": 1.5,
+      "eyeXToleranceCm": 1.0,
+      "distanceToleranceCm": 2.0,
+      "targetIndices": [0, 2, 4, 7, 9, 11]
+    },
+    "headCompensation": {
+      "enabled": true,
+      "lambda": 0.01
+    },
     "autoLoad": true
   },
   "gazeCircle": {
