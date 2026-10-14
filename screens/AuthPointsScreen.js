@@ -276,14 +276,30 @@ export default function AuthPointsScreen({ route, navigation }) {
   // Per-attempt ceiling. Without it, a user who simply cannot land a dwell on
   // one of their points sits on this screen forever with no way forward except
   // Cancel, and the attempt is never recorded as a failure.
+  // The clock only runs while the user can actually capture points: it is
+  // paused while the pose lock is engaged and while drift-check dots are on
+  // screen (the check at the start and the re-check after each pose lock).
+  const driftBusyRef = useRef(false);
+  const handleDriftBusy = useCallback((busy) => {
+    driftBusyRef.current = busy;
+  }, []);
   useEffect(() => {
     if (stage !== 'gaze' || !cfg.attemptTimeoutMs) return undefined;
-    const id = setTimeout(() => {
+    let elapsed = 0;
+    let last = Date.now();
+    const id = setInterval(() => {
+      const now = Date.now();
+      const paused = trackerRef.current.poseLock?.locked === true || driftBusyRef.current;
+      if (!paused) elapsed += now - last;
+      last = now;
+      if (elapsed < cfg.attemptTimeoutMs) return;
+      clearInterval(id);
       if (settledRef.current) return;
       settledRef.current = true;
+      console.log(`[GazeLogin] attempt timed out after ${Math.round(elapsed / 1000)}s of active time`);
       failAttemptRef.current('timeout');
-    }, cfg.attemptTimeoutMs);
-    return () => clearTimeout(id);
+    }, 250);
+    return () => clearInterval(id);
   }, [stage, attemptKey]);
 
   // Pose lock for the gaze pass: if the head leaves the pose the calibration
@@ -314,6 +330,7 @@ export default function AuthPointsScreen({ route, navigation }) {
             title={`Κοίτα τα σημεία του κωδικού σου με τη σειρά (${attempts + 1}/${maxAttempts})`}
             onComplete={handleAttempt}
             onCancel={() => leave(false)}
+            onDriftBusyChange={handleDriftBusy}
           />
         ) : (
           <View style={styles.loadingContainer}>

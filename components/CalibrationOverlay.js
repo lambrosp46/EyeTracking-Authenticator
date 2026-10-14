@@ -300,12 +300,23 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
       const basePose =
         meanPose(collected, window) ?? (positioningRef.current?.distanceCm != null ? positioningRef.current : null);
       const pose = basePose ? { ...basePose, compensated: !!fit.calibration.head } : null;
+      // The MEASURED second pose (mean over its targets, not the nominal
+      // offset): the pose lock lets the head pitch move between the two poses,
+      // the range the head-pose terms were fitted on (utils/headPose.referenceConfig).
+      const poseB = secondPass.length > 0 ? meanPose(secondPass, window) : null;
+      if (pose && poseB && pose.compensated) pose.pitchSpanDeg = [pose.pitchDeg, poseB.pitchDeg];
       const calibration = pose ? { ...fit.calibration, pose } : fit.calibration;
       if (pose) {
         console.log(
           `[Calibration] reference pose: d ${pose.distanceCm.toFixed(1)}cm x ${pose.eyeXFromCenterCm.toFixed(1)} y ${pose.eyeYFromTopCm.toFixed(1)}` +
-            ` · yaw ${pose.yawDeg.toFixed(1)}° pitch ${pose.pitchDeg.toFixed(1)}° roll ${pose.rollDeg.toFixed(1)}°`
+            ` · yaw ${pose.yawDeg.toFixed(1)}° pitch ${pose.pitchDeg.toFixed(1)}° roll ${pose.rollDeg.toFixed(1)}°` +
+            (poseB ? ` · second pose pitch ${poseB.pitchDeg.toFixed(1)}° eyes y ${poseB.eyeYFromTopCm.toFixed(1)}` : '')
         );
+        if (pose.pitchSpanDeg) {
+          const m = settings.positioning?.poseLock?.pitchRange?.marginDeg ?? 1;
+          const [lo, hi] = [Math.min(...pose.pitchSpanDeg) - m, Math.max(...pose.pitchSpanDeg) + m];
+          console.log(`[Calibration] allowed head pitch while tracking: ${lo.toFixed(1)}° … ${hi.toFixed(1)}° (between the two poses ± ${m}°)`);
+        }
       }
       setResult({ quality: fit.quality, calibration, positioning: positioningRef.current });
       setPhase('result');

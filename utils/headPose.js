@@ -143,7 +143,23 @@ export function evaluatePositioning(m, cfg, wasOk = false) {
   if (Math.abs(m.yawDeg - (cfg.targetYawDeg ?? 0)) > cfg.maxHeadYawDeg * f) issues.push('turnedSideways');
 
   const dPitch = m.pitchDeg - (cfg.targetPitchDeg ?? 0);
-  if (dPitch > cfg.maxHeadPitchDeg * f) issues.push('chinDown');
+  if (cfg.pitchRangeDeg) {
+    // Pose lock after a two-pose calibration: while tracking (wasOk), any head
+    // pitch between the first and the second calibration pose (+ a margin) is
+    // fine - the head-pose terms were fitted on exactly that range. Outside it
+    // the fit would extrapolate, so the user is sent back - to the FIRST pose,
+    // where the fit has the most data (12 targets).
+    const [lo, hi] = cfg.pitchRangeDeg;
+    if (wasOk) {
+      const e = cfg.pitchExitMarginDeg ?? 0.5;
+      if (m.pitchDeg > hi + e) issues.push('chinDown');
+      else if (m.pitchDeg < lo - e) issues.push('chinUp');
+    } else {
+      const t = cfg.returnPitchToleranceDeg ?? 1;
+      if (dPitch > t) issues.push('chinDown');
+      else if (dPitch < -t) issues.push('chinUp');
+    }
+  } else if (dPitch > cfg.maxHeadPitchDeg * f) issues.push('chinDown');
   else if (dPitch < -cfg.maxHeadPitchDeg * f) issues.push('chinUp');
 
   if (Math.abs(m.rollDeg - (cfg.targetRollDeg ?? 0)) > cfg.maxHeadRollDeg * f) issues.push('headTilted');
@@ -178,6 +194,18 @@ export function referenceConfig(cfg, ref) {
   // A head-compensated calibration (fitted on two poses) stays accurate over a
   // wider range of poses, so it gets the looser poseLock.compensated limits.
   const lock = ref.compensated ? { ...(cfg.poseLock ?? {}), ...(cfg.poseLock?.compensated ?? {}) } : (cfg.poseLock ?? {});
+  // Pitch window = from the first to the second calibration pose, plus a
+  // margin for sensor noise (only when the fit learnt the head-pose effect).
+  const pr = cfg.poseLock?.pitchRange ?? {};
+  const span = ref.compensated && pr.enabled !== false && Array.isArray(ref.pitchSpanDeg) ? ref.pitchSpanDeg : null;
+  const margin = pr.marginDeg ?? 1;
+  const pitchWindow = span
+    ? {
+        pitchRangeDeg: [Math.min(...span) - margin, Math.max(...span) + margin],
+        pitchExitMarginDeg: pr.exitMarginDeg ?? 0.5,
+        returnPitchToleranceDeg: pr.returnToleranceDeg ?? 1,
+      }
+    : { pitchRangeDeg: null };
   return {
     ...cfg,
     targetDistanceCm: ref.distanceCm,
@@ -196,6 +224,7 @@ export function referenceConfig(cfg, ref) {
     deviceTilt: { mode: 'off' },
     holdStillMs: lock.holdStillMs ?? cfg.holdStillMs,
     exitToleranceFactor: lock.exitToleranceFactor ?? cfg.exitToleranceFactor,
+    ...pitchWindow,
     isReference: true,
   };
 }

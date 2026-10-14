@@ -11,6 +11,7 @@ import {
 
 import settings from '../config/settings.json';
 import { cmToPoints, pointsToCm } from '../utils/gazeMapping';
+import { describeDrift, fitDriftCorrection } from '../utils/driftFit';
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const median = (v) => {
@@ -61,6 +62,9 @@ export default function GazePointConfirm({
   config,
   showUndo = true,
   showReset = true,
+  // Called with true/false while drift-check dots are on screen (login pauses
+  // its attempt timer meanwhile).
+  onDriftBusyChange,
 }) {
   // `config` comes straight from a settings.json import, so its identity is
   // stable across renders and this memo effectively runs once per mount.
@@ -74,11 +78,13 @@ export default function GazePointConfirm({
 
   // ---- drift check -------------------------------------------------------
   // Before any point is captured, the user looks at a few fixed, neutral dots
-  // (the same for everyone, unrelated to the password). Their mean landing
-  // offset - measured NOW, in the pose the points will be looked at in - is
-  // subtracted from all gaze until this screen closes. It catches whatever
-  // shifted the mapping since calibration: a pose change, ARKit drift, or an
-  // over-eager head-pose correction (pilot: a uniform 2.2 cm shift).
+  // (the same for everyone, unrelated to the password). Their landing offsets
+  // - measured NOW, in the pose the points will be looked at in - give a
+  // correction (shift + vertical scale, utils/driftFit.js) applied to all gaze
+  // until this screen closes. It catches whatever shifted the mapping since
+  // calibration: a pose change, ARKit drift, or an over-eager head-pose
+  // correction (pilot: a uniform 2.2 cm shift; later: the top of the image
+  // reading 0.8-1.9 cm low while the bottom was right).
   const driftCfg = cfg.driftCheck ?? {};
   const useDrift = driftCfg.enabled === true && typeof tracker.setDriftCorrection === 'function';
   const [driftPhase, setDriftPhase] = useState(useDrift ? 'pending' : 'done'); // pending | running | done
@@ -119,103 +125,184 @@ export default function GazePointConfirm({
     imageRectRef.current = imageRect;
   }, [imageRect]);
 
-  // Runs once per mount. Deliberately NOT keyed on driftPhase: setting it to
-  // 'running' would otherwise trigger this effect's cleanup and cancel the check.
+  // false once this screen unmounts: every running check stops.
+  const aliveRef = useRef(true);
+  // The correction currently applied (to restore it when a re-check fails).
+  const correctionRef = useRef(null);
+  // True while dots are on screen; the login screen pauses its attempt timer.
+  const driftBusyRef = useRef(false);
+  const onDriftBusyChangeRef = useRef(onDriftBusyChange);
+  onDriftBusyChangeRef.current = onDriftBusyChange;
+  const setBusy = (busy) => {
+    driftBusyRef.current = busy;
+    setDriftPhase(busy ? 'running' : 'done');
+    if (!busy) setDriftDot(null);
+    onDriftBusyChangeRef.current?.(busy);
+  };
+  const setCorrection = (c) => {
+    correctionRef.current = c;
+    trackerRef.current.setDriftCorrection(c);
+  };
+
+  // The correction belongs to this screen only.
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+      trackerRef.current.endCollect?.();
+      trackerRef.current.setDriftCorrection?.(null);
+      onDriftBusyChangeRef.current?.(false);
+    };
+  }, []);
+
+  /**
+   * One drift check: shows the dots, measures the UNCORRECTED landing offsets,
+   * fits the correction (utils/driftFit.js).
+   * @returns {{status: 'applied'|'none'|'failed'|'aborted', correction?: object}}
+   *   aborted = the screen closed, or the pose lock engaged mid-check (the
+   *   samples stop counting then, so the dots can't be measured).
+   */
+  const runDriftCheck = async ({ points, firstWarmupMs, warmupMs, rounds, label }) => {
+    const t = trackerRef.current;
+    const stop = () => !aliveRef.current || trackerRef.current.poseLock?.locked === true;
+    t.setDriftCorrection(null); // measure the uncorrected mapping
+
+    for (let round = 1; round <= rounds; round++) {
+      const offsets = [];
+      for (let i = 0; i < points.length; i++) {
+        const [nx, ny] = points[i];
+        setDriftDot({ nx, ny, n: i + 1, total: points.length, collecting: false });
+        // The first dot appears with the screen: the eye needs longer to find it.
+        await wait(i === 0 ? firstWarmupMs : warmupMs);
+        if (stop()) return { status: 'aborted' };
+        setDriftDot({ nx, ny, n: i + 1, total: points.length, collecting: true });
+        t.beginCollect();
+        await wait(driftCfg.dwellMs ?? 1000);
+        const samples = t.endCollect();
+        if (stop()) return { status: 'aborted' };
+        const rect = imageRectRef.current;
+        if (!rect || samples.length < (driftCfg.minSamples ?? 8)) {
+          offsets.push(null);
+          continue;
+        }
+        const tx = rect.x + nx * rect.width;
+        const ty = rect.y + ny * rect.height;
+        offsets.push({ tx, ty, ox: median(samples.map((p) => p.x)) - tx, oy: median(samples.map((p) => p.y)) - ty });
+      }
+
+      const fmt = (o) => (o ? `(${pointsToCm(o.ox).toFixed(2)}, ${pointsToCm(o.oy).toFixed(2)})` : '(no samples)');
+      const rect = imageRectRef.current;
+      if (!rect) return { status: 'failed' };
+      const fit = fitDriftCorrection(offsets, { top: rect.y, bottom: rect.y + rect.height }, driftCfg, pointsToCm);
+      console.log(
+        `[${label}] round ${round}: offsets cm ${offsets.map(fmt).join(' ')}` +
+          (fit.correction ? ` · ${describeDrift(fit, pointsToCm)}` : ` · ${fit.reason}`)
+      );
+      // The model must explain the dots: a large residual means the user
+      // probably wasn't looking at one of them, and the fit would be a guess.
+      if (fit.ok) {
+        if (fit.slopeClamped) console.log(`[${label}] vertical scale limited to maxScaleChange`);
+        // A small correction is just the normal per-point error of the fit
+        // (~0.5 cm, different at each spot); "correcting" it moves some
+        // points closer and others further. Only a clear error is fixed.
+        if (fit.maxCm < (driftCfg.minCorrectionCm ?? 0.4)) {
+          console.log(`[${label}] largest correction ${fit.maxCm.toFixed(2)}cm is within normal error - no correction needed`);
+          return { status: 'none' };
+        }
+        return { status: 'applied', correction: fit.correction };
+      }
+      if (round === rounds) console.log(`[${label}] dots not consistent (${fit.reason})`);
+    }
+    return { status: 'failed' };
+  };
+
+  // Initial check: runs once per mount. Deliberately NOT keyed on driftPhase:
+  // changing it would otherwise trigger this effect's cleanup.
   const driftStartedRef = useRef(false);
   useEffect(() => {
-    if (!useDrift || !imageRect || driftStartedRef.current) return undefined;
+    if (!useDrift || !imageRect || driftStartedRef.current) return;
     driftStartedRef.current = true;
-    let cancelled = false;
-    const t = trackerRef.current;
 
     (async () => {
       // the image rect must have settled, like for normal captures
-      while (!cancelled && stableCountRef.current < 2) await wait(100);
-      if (cancelled) return;
-      setDriftPhase('running');
-      t.setDriftCorrection(null); // measure the uncorrected mapping
+      while (aliveRef.current && stableCountRef.current < 2) await wait(100);
+      if (!aliveRef.current) return;
+      setBusy(true);
+      let res;
+      do {
+        // a pose lock mid-check aborts it: wait for the pose, then start over
+        while (aliveRef.current && trackerRef.current.poseLock?.locked) await wait(150);
+        if (!aliveRef.current) return;
+        res = await runDriftCheck({
+          points: driftCfg.points ?? [[0.5, 0.1], [0.5, 0.5], [0.12, 0.9], [0.88, 0.9]],
+          firstWarmupMs: driftCfg.firstWarmupMs ?? 1200,
+          warmupMs: driftCfg.warmupMs ?? 700,
+          rounds: driftCfg.maxRounds ?? 2,
+          label: 'DriftCheck',
+        });
+      } while (res.status === 'aborted' && aliveRef.current);
+      if (!aliveRef.current) return;
 
-      const points = driftCfg.points ?? [[0.5, 0.1], [0.12, 0.9], [0.88, 0.9]];
-      const rounds = driftCfg.maxRounds ?? 2;
-      let applied = null;
-
-      for (let round = 1; round <= rounds && !cancelled; round++) {
-        const offsets = [];
-        for (let i = 0; i < points.length && !cancelled; i++) {
-          const [nx, ny] = points[i];
-          setDriftDot({ nx, ny, n: i + 1, total: points.length, collecting: false });
-          // The first dot appears with the screen: the eye needs longer to find it.
-          await wait(i === 0 ? (driftCfg.firstWarmupMs ?? 1200) : (driftCfg.warmupMs ?? 700));
-          if (cancelled) return;
-          setDriftDot({ nx, ny, n: i + 1, total: points.length, collecting: true });
-          t.beginCollect();
-          await wait(driftCfg.dwellMs ?? 1000);
-          const samples = t.endCollect();
-          const rect = imageRectRef.current;
-          if (!rect || samples.length < (driftCfg.minSamples ?? 8)) {
-            offsets.push(null);
-            continue;
-          }
-          const tx = rect.x + nx * rect.width;
-          const ty = rect.y + ny * rect.height;
-          offsets.push({ dx: median(samples.map((p) => p.x)) - tx, dy: median(samples.map((p) => p.y)) - ty });
-        }
-        if (cancelled) return;
-
-        const ok = offsets.filter(Boolean);
-        const lastRound = round === rounds;
-        let spreadCm = Infinity;
-        if (ok.length === points.length) {
-          spreadCm = 0;
-          for (const a of ok) for (const b of ok) spreadCm = Math.max(spreadCm, pointsToCm(Math.hypot(a.dx - b.dx, a.dy - b.dy)));
-        }
-        const fmt = (o) => (o ? `(${pointsToCm(o.dx).toFixed(2)}, ${pointsToCm(o.dy).toFixed(2)})` : '(no samples)');
-        console.log(
-          `[DriftCheck] round ${round}: offsets cm ${offsets.map(fmt).join(' ')} · spread ${Number.isFinite(spreadCm) ? spreadCm.toFixed(2) : '-'}cm`
-        );
-        // The dots must agree with each other: if they don't, the user probably
-        // wasn't looking at one of them, and the mean would be a guess.
-        if (spreadCm <= (driftCfg.maxSpreadCm ?? 2.0)) {
-          let dx = ok.reduce((a, o) => a + o.dx, 0) / ok.length;
-          let dy = ok.reduce((a, o) => a + o.dy, 0) / ok.length;
-          // A small mean offset is just the normal per-point error of the fit
-          // (~0.5-1 cm, different at each spot); "correcting" it moves some
-          // points closer and others further. Only a clear common shift is fixed.
-          if (pointsToCm(Math.hypot(dx, dy)) < (driftCfg.minCorrectionCm ?? 0.4)) {
-            console.log(`[DriftCheck] shift ${pointsToCm(Math.hypot(dx, dy)).toFixed(2)}cm is within normal error - no correction needed`);
-            applied = null;
-            break;
-          }
-          const maxPts = cmToPoints(driftCfg.maxCorrectionCm ?? 3);
-          const mag = Math.hypot(dx, dy);
-          if (mag > maxPts) {
-            dx *= maxPts / mag;
-            dy *= maxPts / mag;
-          }
-          applied = { dx, dy };
-          break;
-        }
-        if (lastRound) console.log('[DriftCheck] dots disagreed - continuing WITHOUT correction');
+      if (res.status === 'applied') {
+        setCorrection(res.correction);
+        console.log('[DriftCheck] correction applied');
+      } else {
+        setCorrection(null);
+        if (res.status === 'failed') console.log('[DriftCheck] continuing WITHOUT correction');
       }
-      if (cancelled) return;
-
-      t.setDriftCorrection(applied);
-      if (applied) {
-        console.log(`[DriftCheck] applied correction dx ${pointsToCm(-applied.dx).toFixed(2)}cm dy ${pointsToCm(-applied.dy).toFixed(2)}cm`);
-      }
-      setDriftDot(null);
-      setDriftPhase('done');
+      setBusy(false);
     })();
-
-    return () => {
-      cancelled = true;
-      t.endCollect();
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [useDrift, imageRect != null]);
 
-  // The correction belongs to this screen only.
-  useEffect(() => () => trackerRef.current.setDriftCorrection?.(null), []);
+  // ---- re-check after the pose lock ----------------------------------------
+  // Coming back from the pose lock, the head is back within the limits but not
+  // in exactly the same pose (pilot: the mapping moved 0.8-1.2 cm, and the next
+  // point landed 1.5 cm off while the four before were <= 0.5 cm). So before
+  // any further capture, a short check on a few neutral dots measures the
+  // correction again. Points captured before the lock stay as they are.
+  const recheckCfg = driftCfg.recheckAfterPoseLock ?? {};
+  const useRecheck = useDrift && recheckCfg.enabled === true;
+  const lockedNow = tracker.poseLock?.locked === true;
+  const prevLockedRef = useRef(lockedNow);
+  useEffect(() => {
+    const wasLocked = prevLockedRef.current;
+    prevLockedRef.current = lockedNow;
+    if (!useRecheck || !wasLocked || lockedNow) return; // only on a release
+    if (driftBusyRef.current || driftPhase !== 'done') return; // a check is already running
+    if (capturedRef.current.length >= expectedCount) return;
+
+    (async () => {
+      const previous = correctionRef.current;
+      bufferRef.current = [];
+      setDwellProgress(0);
+      setBusy(true);
+      const res = await runDriftCheck({
+        points: recheckCfg.points ?? [[0.5, 0.1], [0.5, 0.5], [0.5, 0.9]],
+        firstWarmupMs: recheckCfg.firstWarmupMs ?? 900,
+        warmupMs: recheckCfg.warmupMs ?? 600,
+        rounds: recheckCfg.maxRounds ?? 2,
+        label: 'DriftRecheck',
+      });
+      if (!aliveRef.current) return;
+
+      if (res.status === 'applied') {
+        setCorrection(res.correction);
+        console.log('[DriftRecheck] new correction applied');
+      } else if (res.status === 'none') {
+        setCorrection(null);
+        console.log('[DriftRecheck] no correction needed');
+      } else {
+        // failed: keep what was measured before. aborted: the lock engaged
+        // again - the next release starts a new re-check.
+        setCorrection(previous);
+        console.log(`[DriftRecheck] ${res.status} - keeping the previous correction`);
+      }
+      bufferRef.current = [];
+      setBusy(false);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lockedNow]);
 
   const stabilityRadius = cmToPoints(cfg.stabilityRadiusCm);
   const releaseRadius = cmToPoints(cfg.releaseRadiusCm);

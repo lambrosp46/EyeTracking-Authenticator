@@ -89,6 +89,12 @@
       "maxDeviceRotationDps": 25,
       "exitToleranceFactor": 1.5,
       "holdStillMs": 600,
+      "pitchRange": {
+        "enabled": true,
+        "marginDeg": 1.0,
+        "exitMarginDeg": 0.5,
+        "returnToleranceDeg": 1.0
+      },
       "compensated": {
         "distanceToleranceCm": 2.0,
         "eyeXToleranceCm": 1.0,
@@ -146,15 +152,26 @@
   "gazeConfirm": {
     "driftCheck": {
       "enabled": true,
-      "points": [[0.5, 0.1], [0.12, 0.9], [0.88, 0.9]],
+      "points": [[0.5, 0.1], [0.5, 0.5], [0.12, 0.9], [0.88, 0.9]],
+      "mode": "linearY",
       "firstWarmupMs": 1200,
       "warmupMs": 700,
       "dwellMs": 1000,
       "minSamples": 8,
-      "maxSpreadCm": 2.0,
+      "maxResidualCm": 0.8,
+      "maxScaleChange": 0.3,
+      "minSpanCm": 3,
+      "fitXScale": false,
       "minCorrectionCm": 0.4,
       "maxCorrectionCm": 3.0,
-      "maxRounds": 2
+      "maxRounds": 2,
+      "recheckAfterPoseLock": {
+        "enabled": true,
+        "points": [[0.5, 0.1], [0.5, 0.5], [0.5, 0.9]],
+        "firstWarmupMs": 900,
+        "warmupMs": 600,
+        "maxRounds": 2
+      }
     },
     "dwellMs": 900,
     "stabilityRadiusCm": 1.2,

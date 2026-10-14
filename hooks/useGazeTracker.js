@@ -81,8 +81,9 @@ export function useGazeTracker(options = {}) {
   // the pose the calibration was made in (calibration.pose). Off by default;
   // screens switch it on for the stretch where accuracy matters (login gaze,
   // accuracy check) via setPoseLockActive.
-  // Drift correction measured by the drift check (GazePointConfirm): a
-  // constant offset, in screen points, subtracted from every mapped sample.
+  // Drift correction measured by the drift check (GazePointConfirm): an
+  // offset plus (optionally) a vertical scale, in screen points, removed from
+  // every mapped sample. See setDriftCorrection.
   const driftRef = useRef(null);
   const poseLockActiveRef = useRef(false);
   const poseLockRef = useRef({ locked: false, okSince: null, since: 0, smoothed: null });
@@ -146,7 +147,12 @@ export function useGazeTracker(options = {}) {
         ? applyCalibration(calibrationRef.current, sample.sx, sample.sy, sample)
         : raw;
       const drift = driftRef.current;
-      const mapped = drift ? { x: fitted.x - drift.dx, y: fitted.y - drift.dy } : fitted;
+      const mapped = drift
+        ? {
+            x: drift.x0 + (fitted.x - drift.x0 - drift.dx) / drift.scaleX,
+            y: drift.y0 + (fitted.y - drift.y0 - drift.dy) / drift.scaleY,
+          }
+        : fitted;
 
       const smoothed = filterRef.current.filter(mapped.x, mapped.y, sample.timestamp);
       const final = validity.clampToScreen ? clampToScreen(smoothed, window) : smoothed;
@@ -238,7 +244,13 @@ export function useGazeTracker(options = {}) {
         st.since = now;
         st.okSince = null;
         setPoseLockState({ locked: true, issue: v.primary });
-        if (settings.positioning.logDiagnostics) console.log(`[PoseLock] locked: ${v.issues.join(',')}`);
+        if (settings.positioning.logDiagnostics) {
+          const p = st.smoothed?.pitchDeg;
+          const win = rcfg.pitchRangeDeg
+            ? ` · allowed ${rcfg.pitchRangeDeg[0].toFixed(1)}…${rcfg.pitchRangeDeg[1].toFixed(1)}°`
+            : '';
+          console.log(`[PoseLock] locked: ${v.issues.join(',')}${p != null ? ` (pitch ${p.toFixed(1)}°${win})` : ''}`);
+        }
       }
     } else {
       const v = evaluatePositioning(st.smoothed, rcfg, false);
@@ -387,9 +399,27 @@ export function useGazeTracker(options = {}) {
   // written to or read from the device: every registration, login and test
   // session starts with a calibration of its own.
 
-  /** Set (or clear with null) the drift correction {dx, dy} in screen points. */
+  /**
+   * Set (or clear with null) the drift correction, in screen points.
+   *   { dx, dy }                       - a plain shift (as before)
+   *   { dx, dy, scaleY, y0 }           - plus a vertical scale around y0
+   *   { dx, dy, scaleX, x0, scaleY, y0 }
+   * Meaning of the model (measured by the drift check): a gaze that truly
+   * lands at y is reported at  y0 + scaleY*(y - y0) + dy.  The hook inverts it.
+   */
   const setDriftCorrection = useCallback((d) => {
-    driftRef.current = d && Number.isFinite(d.dx) && Number.isFinite(d.dy) ? { dx: d.dx, dy: d.dy } : null;
+    const num = (v, fallback) => (Number.isFinite(v) ? v : fallback);
+    driftRef.current =
+      d && Number.isFinite(d.dx) && Number.isFinite(d.dy)
+        ? {
+            dx: d.dx,
+            dy: d.dy,
+            scaleX: num(d.scaleX, 1),
+            scaleY: num(d.scaleY, 1),
+            x0: num(d.x0, 0),
+            y0: num(d.y0, 0),
+          }
+        : null;
     filterRef.current.reset();
   }, []);
 
