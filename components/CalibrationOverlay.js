@@ -13,6 +13,7 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 import settings from '../config/settings.json';
 import PositionGuide from './PositionGuide';
+import CalibrationHowto from './CalibrationHowto';
 import { writeToLogFile } from '../utils/sessionLog';
 import { hasReferencePose, headMetrics, screenGeometry } from '../utils/headPose';
 import { pointsToCm } from '../utils/gazeMapping';
@@ -113,6 +114,11 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
   // when there is no positioning step to re-arm); tries counts them for the log.
   const [run, setRun] = useState(0);
   const triesRef = useRef(0);
+  // "Before you start" instructions (calibrate only), once per opening.
+  const useHowto = mode === 'calibrate' && cfg.instructions?.enabled === true;
+  const [howtoDone, setHowtoDone] = useState(!useHowto);
+  // Message shown when a target is redone (head turned / gaze not steady).
+  const [retryMsg, setRetryMsg] = useState(null);
 
   const pulse = useRef(new Animated.Value(1)).current;
   const cancelledRef = useRef(false);
@@ -123,6 +129,7 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
   useEffect(() => {
     if (!visible) {
       triesRef.current = 0;
+      setHowtoDone(!useHowto);
       setPositioned(!usePositioning);
       setPhase(usePositioning ? 'position' : 'intro'); // no flash of the first target on reopen
       positioningRef.current = null;
@@ -166,6 +173,10 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
     setPose2Target(null);
     setReturnTarget(null);
 
+    if (!howtoDone) {
+      setPhase('howto'); // CalibrationHowto sets howtoDone -> this effect runs again
+      return undefined;
+    }
     if (!positioned) {
       setPhase('position'); // PositionGuide calls handlePositioned -> this effect runs again
       return undefined;
@@ -183,22 +194,85 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
       await wait(usePositioning ? 600 : 1200);
       const collected = [];
 
+      // ---- per-target checks ----------------------------------------------
+      // New users made two errors that ruined calibrations: turning the HEAD
+      // towards each dot instead of moving the eyes (head range up to 13°, vs
+      // < 2° for a trained user), and not holding the gaze on the dot (~2x the
+      // jitter). Each target is checked right after collection; a failed one
+      // is not used, the user is told what went wrong, and the target is shown
+      // again (at most maxRetries times, then it is kept as it is).
+      // Head reference = median head angle over the targets kept so far in this
+      // pose (the first target sets it). Not the positioning snapshot: users
+      // settle after it (replay: a trained user moved from 42 to 31 cm, and
+      // every target would have been flagged). A target kept after maxRetries
+      // also joins the reference, so a wrong first reference corrects itself.
+      // Replay on all logged calibrations: trained user 0 head / 0-2 gaze
+      // retries per calibration; new users 11 head (2 of 6) or 3-5 gaze.
+      const checks = cfg.targetChecks ?? {};
+      const useChecks = checks.enabled === true;
+      const headRefs = { yaw: [], pitch: [] };
+      const resetHeadRef = () => {
+        headRefs.yaw = [];
+        headRefs.pitch = [];
+      };
+      const addHeadRef = (head) => {
+        if (!head) return;
+        headRefs.yaw.push(head.yawDeg);
+        headRefs.pitch.push(head.pitchDeg);
+      };
+      const checkTarget = (samples) => {
+        if (!useChecks || samples.length < cfg.minSamplesPerPoint) return { head: null, problem: null };
+        // gaze steadiness: robust spread of the RAW gaze (screen plane, cm)
+        const jitterCm = 100 * Math.hypot(mad(samples.map((s) => s.sx)), mad(samples.map((s) => s.sy)));
+        const head = meanPose(samples, window);
+        if (head && headRefs.yaw.length) {
+          const dYaw = head.yawDeg - median(headRefs.yaw);
+          const dPitch = head.pitchDeg - median(headRefs.pitch);
+          if (Math.abs(dYaw) > (checks.maxHeadYawDeg ?? 2.5) || Math.abs(dPitch) > (checks.maxHeadPitchDeg ?? 3.5)) {
+            return { head, problem: { reason: 'head', detail: `head moved yaw ${dYaw.toFixed(1)}° pitch ${dPitch.toFixed(1)}°` } };
+          }
+        }
+        if (jitterCm > (checks.maxRawJitterCm ?? 0.2)) {
+          return { head, problem: { reason: 'gaze', detail: `gaze not steady (raw jitter ${jitterCm.toFixed(2)})` } };
+        }
+        return { head, problem: null };
+      };
+      const RETRY_TEXT = {
+        head: 'Μόνο τα μάτια — κράτα το κεφάλι ακίνητο',
+        gaze: 'Κράτα το βλέμμα σταθερά στο κέντρο της κουκκίδας',
+      };
+
       // One target: warm-up (eye still travelling, discarded), then collect.
       const runTarget = async (target, targetIndex, n, into) => {
         setIndex(n);
         setCurrent(target);
-        setPhase('warmup');
-        await wait(cfg.warmupMs);
-        if (cancelledRef.current) return false;
-        setPhase('collect');
-        tracker.beginCollect();
-        await wait(cfg.dwellMs);
-        const samples = tracker.endCollect();
-        if (cancelledRef.current) return false;
-        for (const s of samples) {
-          into.push({ ...s, sx: s.sx, sy: s.sy, targetX: target.x, targetY: target.y, targetIndex });
+        for (let attempt = 0; ; attempt++) {
+          setPhase('warmup');
+          await wait(cfg.warmupMs);
+          if (cancelledRef.current) return false;
+          setPhase('collect');
+          tracker.beginCollect();
+          await wait(cfg.dwellMs);
+          const samples = tracker.endCollect();
+          if (cancelledRef.current) return false;
+
+          const { head, problem } = checkTarget(samples);
+          if (problem && attempt < (checks.maxRetries ?? 2)) {
+            console.log(`[Calibration] target ${targetIndex + 1} redone (${attempt + 1}): ${problem.detail}`);
+            setRetryMsg(RETRY_TEXT[problem.reason]);
+            setPhase('retry');
+            await wait(checks.messageMs ?? 1600);
+            setRetryMsg(null);
+            if (cancelledRef.current) return false;
+            continue;
+          }
+          if (problem) console.log(`[Calibration] target ${targetIndex + 1} kept after ${attempt} retries: ${problem.detail}`);
+          if (useChecks) addHeadRef(head);
+          for (const s of samples) {
+            into.push({ ...s, sx: s.sx, sy: s.sy, targetX: target.x, targetY: target.y, targetIndex });
+          }
+          return true;
         }
-        return true;
       };
 
       for (let i = 0; i < targets.length; i++) {
@@ -225,6 +299,7 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
               `(first pose ${poseA.pitchDeg.toFixed(1)}°), eyes y ${snapshot.eyeYFromTopCm.toFixed(1)}cm`
           );
           setPhase('intro');
+          resetHeadRef(); // the head is meant to be in the new pose now
           await wait(600);
           for (let n = 0; n < secondTargets.length; n++) {
             if (cancelledRef.current) return;
@@ -343,7 +418,7 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
       tracker.setPoseLockActive(lockWasActive);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, mode, positioned, run]);
+  }, [visible, mode, positioned, run, howtoDone]);
 
   // Start over from the positioning step (rejected calibration).
   const retry = () => {
@@ -389,6 +464,10 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
         <View style={[styles.root, { backgroundColor: cfg.backgroundColor }]}>
           {/* `visible &&`: on close the phase is reset to 'position' while the
               modal is still fading out - without this the guide flashes up. */}
+          {visible && phase === 'howto' && (
+            <CalibrationHowto onStart={() => setHowtoDone(true)} onCancel={onClose} />
+          )}
+
           {visible && phase === 'position' && (
             <PositionGuide tracker={tracker} onReady={handlePositioned} onCancel={onClose} reference={reference} />
           )}
@@ -416,7 +495,7 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
             />
           )}
 
-          {phase !== 'result' && phase !== 'position' && phase !== 'pose2' && phase !== 'return' && (
+          {phase !== 'result' && phase !== 'position' && phase !== 'pose2' && phase !== 'return' && phase !== 'howto' && (
             <>
               <Animated.View
                 style={[
@@ -440,11 +519,13 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
                 <Text style={styles.hudTitle}>
                   {mode === 'validate' ? 'Έλεγχος ακρίβειας' : inSecondPose ? 'Βαθμονόμηση · δεύτερη στάση' : 'Βαθμονόμηση'}
                 </Text>
-                <Text style={styles.hudBody}>
-                  {phase === 'intro'
+                <Text style={[styles.hudBody, phase === 'retry' && styles.hudWarn]}>
+                  {phase === 'retry'
+                    ? retryMsg
+                    : phase === 'intro'
                     ? inSecondPose || index === targets.length - 1
-                      ? 'Μείνε σε αυτή τη νέα στάση και κοίτα κάθε κουκκίδα.'
-                      : 'Μείνε σε αυτή τη θέση και κοίτα ίσια κάθε κουκκίδα.'
+                      ? 'Μείνε σε αυτή τη νέα στάση. Κράτα το κεφάλι ακίνητο και κοίτα κάθε κουκκίδα μόνο με τα μάτια.'
+                      : 'Κράτα το κεφάλι ακίνητο και κοίτα κάθε κουκκίδα μόνο με τα μάτια.'
                     : tracker.poseLock?.locked
                       ? 'Η στάση σου άλλαξε — γύρνα στη θέση της βαθμονόμησης'
                       : collecting
@@ -552,6 +633,19 @@ function Stat({ label, value }) {
   );
 }
 
+function median(values) {
+  const a = values.filter(Number.isFinite).sort((x, y) => x - y);
+  if (!a.length) return 0;
+  const m = Math.floor(a.length / 2);
+  return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+}
+
+/** Robust spread (scaled median absolute deviation): a single saccade doesn't inflate it. */
+function mad(values) {
+  const m = median(values);
+  return 1.4826 * median(values.map((v) => Math.abs(v - m)));
+}
+
 /** Average head pose over the collected samples, in headPose.headMetrics units. */
 function meanPose(samples, window) {
   const geom = screenGeometry(settings.eyeTracking.screen, window, pointsToCm);
@@ -635,6 +729,7 @@ const styles = StyleSheet.create({
   centre: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', gap: 12 },
   hudTitle: { color: '#FFF', fontSize: 15, fontWeight: '600', letterSpacing: 0.4 },
   hudBody: { color: 'rgba(255,255,255,0.65)', fontSize: 14, textAlign: 'center', marginTop: 6, lineHeight: 20 },
+  hudWarn: { color: '#FFD60A', fontSize: 17, fontWeight: '700' },
   hudCount: { color: 'rgba(255,255,255,0.45)', fontSize: 12, marginTop: 12 },
   progressTrack: {
     height: 2, width: '60%', backgroundColor: 'rgba(255,255,255,0.15)',

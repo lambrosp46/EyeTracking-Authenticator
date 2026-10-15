@@ -120,6 +120,17 @@
     "targetColor": "#FFD60A",
     "backgroundColor": "#000000",
     "maxAcceptableErrorCm": 1.2,
+    "instructions": {
+      "enabled": true
+    },
+    "targetChecks": {
+      "enabled": true,
+      "maxHeadYawDeg": 2.5,
+      "maxHeadPitchDeg": 3.5,
+      "maxRawJitterCm": 0.35,
+      "maxRetries": 2,
+      "messageMs": 1600
+    },
     "dumpSamples": true,
     "secondPose": {
       "enabled": true,
