@@ -365,6 +365,10 @@ export default function RegisterScreen({ navigation }) {
                   imageUri={imageUri}
                   tracker={tracker}
                   expectedCount={settings.pointSelector.maxPoints}
+                  // Lets the confirm pass ignore fixations off the expected
+                  // point and show the tapped points on request. Login never
+                  // passes this.
+                  expectedPoints={pendingPoints}
                   onComplete={handleGazeConfirmed}
                   onCancel={handleCancelPoints}
                 />

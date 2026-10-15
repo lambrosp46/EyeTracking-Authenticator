@@ -1,10 +1,11 @@
 {
   "pointSelector": {
     "showSelectedPoints": true,
-    "maxPoints": 5,
+    "maxPoints": 3,
     "dotColor": "#007AFF",
     "dotDiameterCm": 1.5,
     "minDistanceCm": 2.0,
+    "tapToRemoveLast": true,
     "screenCoverage": 0.98
   },
   "authentication": {
@@ -200,6 +201,10 @@
     "stabilityRadiusCm": 1.2,
     "releaseRadiusCm": 2.0,
     "matchToleranceCm": 1,
+    "ignoreOffTarget": true,
+    "offTargetToleranceCm": null,
+    "maxIgnoredPerPoint": 5,
+    "allowRevealPoints": true,
     "pollIntervalMs": 40,
     "showProgress": true,
     "showGazeCircle": true,
@@ -213,6 +218,8 @@
     "stabilityRadiusCm": 0.9,
     "releaseRadiusCm": 2.0,
     "matchToleranceCm": 1.0,
+    "ignoreOffTarget": false,
+    "allowRevealPoints": false,
     "pollIntervalMs": 40,
     "showProgress": true,
     "showGazeCircle": false,

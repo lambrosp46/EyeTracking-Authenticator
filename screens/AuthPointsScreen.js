@@ -232,6 +232,9 @@ export default function AuthPointsScreen({ route, navigation }) {
     (gazePoints, meta) => {
       if (settledRef.current) return;
       settledRef.current = true;
+      // The attempt is over: no pose lock while the result is on screen (the
+      // user lowers the phone to read it). The next attempt switches it on again.
+      trackerRef.current.setPoseLockActive(false);
 
       const stored = [...storedPoints].sort((a, b) => a.point_index - b.point_index);
 
@@ -297,6 +300,7 @@ export default function AuthPointsScreen({ route, navigation }) {
       clearInterval(id);
       if (settledRef.current) return;
       settledRef.current = true;
+      trackerRef.current.setPoseLockActive(false);
       console.log(`[GazeLogin] attempt timed out after ${Math.round(elapsed / 1000)}s of active time`);
       failAttemptRef.current('timeout');
     }, 250);
@@ -311,7 +315,7 @@ export default function AuthPointsScreen({ route, navigation }) {
     if (stage !== 'gaze') return undefined;
     trackerRef.current.setPoseLockActive(true);
     return () => trackerRef.current.setPoseLockActive(false);
-  }, [stage]);
+  }, [stage, attemptKey]); // on again for every new attempt
 
   const gazeReady = stage === 'gaze' && displayUri;
   const poseLocked = gazeReady && tracker.poseLock?.locked && tracker.calibration?.pose;

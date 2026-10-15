@@ -65,10 +65,41 @@ export default function GazePointConfirm({
   // Called with true/false while drift-check dots are on screen (login pauses
   // its attempt timer meanwhile).
   onDriftBusyChange,
+  // REGISTRATION ONLY: the points the user just tapped (normalized, in order).
+  // With them the screen knows which point is expected next, so it can
+  //  - ignore a fixation that is not on that point (cfg.ignoreOffTarget), and
+  //  - show the tapped points on request (cfg.allowRevealPoints).
+  // Login must NEVER pass this: per-point feedback there would turn the
+  // 5-point secret into five 1-point guesses (see AuthPointsScreen).
+  expectedPoints,
 }) {
   // `config` comes straight from a settings.json import, so its identity is
   // stable across renders and this memo effectively runs once per mount.
   const cfg = useMemo(() => ({ ...settings.gazeConfirm, ...(config ?? {}) }), [config]);
+
+  const hasExpected = Array.isArray(expectedPoints) && expectedPoints.length > 0;
+  const filterOffTarget = hasExpected && cfg.ignoreOffTarget === true;
+  const canReveal = hasExpected && cfg.allowRevealPoints === true;
+  // Same tolerance the final verification uses, so a point accepted here is
+  // also accepted there.
+  const offTargetToleranceCm =
+    cfg.offTargetToleranceCm ?? cfg.matchToleranceCm ?? settings.pointSelector.dotDiameterCm;
+  const expectedRef = useRef(expectedPoints);
+  expectedRef.current = expectedPoints;
+  const [revealed, setRevealed] = useState(false);
+  // Brief "that is not point N" hint after an ignored fixation.
+  const [offTargetHint, setOffTargetHint] = useState(false);
+  const offTargetTimerRef = useRef(null);
+  useEffect(() => () => clearTimeout(offTargetTimerRef.current), []);
+  // Ignored fixations for the point currently expected. Without a cap, a point
+  // the user can never hit by gaze would be ignored forever: the attempt never
+  // ends, maxAttempts never applies, and registration stops proving the point
+  // is reachable. After maxIgnoredPerPoint misses the closest one is recorded,
+  // so the normal verification fails it with the usual message.
+  const ignoredRef = useRef({ index: -1, count: 0, best: null });
+  const clearIgnored = () => {
+    ignoredRef.current = { index: -1, count: 0, best: null };
+  };
 
   const [captured, setCaptured] = useState([]);
   const [imageRect, setImageRect] = useState(null);
@@ -134,6 +165,8 @@ export default function GazePointConfirm({
   const onDriftBusyChangeRef = useRef(onDriftBusyChange);
   onDriftBusyChangeRef.current = onDriftBusyChange;
   const setBusy = (busy) => {
+    // A (re-)check changes the mapping: earlier misses no longer count.
+    clearIgnored();
     driftBusyRef.current = busy;
     setDriftPhase(busy ? 'running' : 'done');
     if (!busy) setDriftDot(null);
@@ -492,13 +525,66 @@ export default function GazePointConfirm({
       const held = now - buf[0].t;
       setDwellProgress(Math.min(1, held / cfg.dwellMs));
 
-      if (held >= cfg.dwellMs) commit({ x: cx, y: cy });
+      if (held < cfg.dwellMs) return;
+
+      // Registration: a fixation that is not on the point expected next (a
+      // glance at the buttons, at another part of the photo, at a later point)
+      // is ignored instead of being recorded as that point. The dwell simply
+      // restarts; nothing is disarmed, so the next fixation on the right point
+      // is captured normally.
+      if (filterOffTarget) {
+        const index = capturedRef.current.length;
+        const target = expectedRef.current?.[index];
+        if (target) {
+          const tx = imageRect.x + target.x * imageRect.width;
+          const ty = imageRect.y + target.y * imageRect.height;
+          const distanceCm = pointsToCm(Math.hypot(cx - tx, cy - ty));
+          if (distanceCm > offTargetToleranceCm) {
+            const ign = ignoredRef.current.index === index ? ignoredRef.current : { index, count: 0, best: null };
+            ign.count += 1;
+            if (!ign.best || distanceCm < ign.best.distanceCm) ign.best = { x: cx, y: cy, distanceCm };
+            ignoredRef.current = ign;
+            const maxIgnored = cfg.maxIgnoredPerPoint;
+
+            if (maxIgnored > 0 && ign.count >= maxIgnored) {
+              console.log(
+                `[GazeConfirm] #${index + 1}: no fixation within ${offTargetToleranceCm.toFixed(2)}cm ` +
+                  `after ${ign.count} tries - recording the closest (${ign.best.distanceCm.toFixed(2)}cm) so the attempt is judged`
+              );
+              const best = ign.best;
+              clearIgnored();
+              setOffTargetHint(false);
+              commit({ x: best.x, y: best.y });
+              return;
+            }
+
+            if (cfg.logPoints) {
+              console.log(
+                `[GazeConfirm] ignored fixation for #${index + 1}: ` +
+                  `${distanceCm.toFixed(2)}cm from the expected point (limit ${offTargetToleranceCm.toFixed(2)}cm)` +
+                  (maxIgnored > 0 ? ` [${ign.count}/${maxIgnored}]` : '')
+              );
+            }
+            bufferRef.current = [];
+            setDwellProgress(0);
+            setOffTargetHint(true);
+            clearTimeout(offTargetTimerRef.current);
+            offTargetTimerRef.current = setTimeout(() => setOffTargetHint(false), 1500);
+            return;
+          }
+        }
+      }
+
+      clearIgnored();
+      setOffTargetHint(false);
+      commit({ x: cx, y: cy });
     }, cfg.pollIntervalMs);
 
     return () => clearInterval(id);
-  }, [cfg, imageRect, captured.length, armed, expectedCount, commit, releaseRadius, stabilityRadius, tracker, driftPhase]);
+  }, [cfg, imageRect, captured.length, armed, expectedCount, commit, releaseRadius, stabilityRadius, tracker, driftPhase, filterOffTarget, offTargetToleranceCm]);
 
   const undo = () => {
+    clearIgnored();
     const next = capturedRef.current.slice(0, -1);
     capturedRef.current = next;
     setCaptured(next);
@@ -509,6 +595,7 @@ export default function GazePointConfirm({
   };
 
   const reset = () => {
+    clearIgnored();
     capturedRef.current = [];
     setCaptured([]);
     bufferRef.current = [];
@@ -525,6 +612,8 @@ export default function GazePointConfirm({
       <Text style={styles.subtitle}>
         {driftPhase !== 'done'
           ? `Γρήγορος έλεγχος: κοίτα την κίτρινη κουκκίδα${driftDot ? ` (${driftDot.n}/${driftDot.total})` : ''}`
+          : offTargetHint
+          ? `Αυτό δεν είναι το σημείο ${captured.length + 1} — κοίτα το σωστό σημείο`
           : subtitle ??
           (armed
             ? `Κράτησε το βλέμμα σου σταθερό (${captured.length + 1}/${expectedCount})`
@@ -566,6 +655,30 @@ export default function GazePointConfirm({
             </View>
           </View>
         )}
+
+        {/* The tapped password points, shown only while "Δείξε σημεία" is on.
+            Drawn at the box's own size (same as PointSelector), not at the
+            measured window rect, because they live inside the box. */}
+        {canReveal &&
+          revealed &&
+          driftPhase === 'done' &&
+          expectedPoints.map((p, i) => (
+            <View
+              key={`reveal-${i}`}
+              pointerEvents="none"
+              style={[
+                styles.revealDot,
+                {
+                  left: p.x * boxSize.width - DOT_SIZE / 2,
+                  top: p.y * boxSize.height - DOT_SIZE / 2,
+                  backgroundColor: settings.pointSelector.dotColor,
+                  opacity: i < captured.length ? 0.4 : 0.9,
+                },
+              ]}
+            >
+              <Text style={styles.capturedIndex}>{i + 1}</Text>
+            </View>
+          ))}
 
         {cfg.showCapturedPoints &&
           imageRect &&
@@ -610,6 +723,17 @@ export default function GazePointConfirm({
             <Text style={[styles.ghostText, !captured.length && styles.disabled]}>Επανεκκίνηση</Text>
           </TouchableOpacity>
         )}
+        {canReveal && (
+          <TouchableOpacity
+            onPress={() => setRevealed((v) => !v)}
+            disabled={driftPhase !== 'done'}
+            style={styles.ghostButton}
+          >
+            <Text style={[styles.ghostText, driftPhase !== 'done' && styles.disabled]}>
+              {revealed ? 'Κρύψε σημεία' : 'Δείξε σημεία'}
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
 
     </View>
@@ -617,8 +741,19 @@ export default function GazePointConfirm({
 }
 
 const DRIFT_DOT = cmToPoints(1.2);
+const DOT_SIZE = cmToPoints(settings.pointSelector.dotDiameterCm);
 
 const styles = StyleSheet.create({
+  revealDot: {
+    position: 'absolute',
+    width: DOT_SIZE,
+    height: DOT_SIZE,
+    borderRadius: DOT_SIZE / 2,
+    borderWidth: 2,
+    borderColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   driftDim: { backgroundColor: 'rgba(0,0,0,0.55)' },
   driftDot: {
     position: 'absolute', width: DRIFT_DOT, height: DRIFT_DOT, borderRadius: DRIFT_DOT / 2,

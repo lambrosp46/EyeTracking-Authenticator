@@ -23,6 +23,8 @@ const DOT_SIZE = cmToPoints(settings.pointSelector.dotDiameterCm);
 // stays consistent across devices, per the thesis's physical-independence
 // requirement for tolerances.
 const MIN_DISTANCE = cmToPoints(settings.pointSelector.minDistanceCm ?? 2.0);
+// A tap counts as "on" a placed dot when it lands inside the drawn circle.
+const HIT_RADIUS = DOT_SIZE / 2;
 
 /**
  * PointSelector
@@ -80,6 +82,9 @@ const MIN_DISTANCE = cmToPoints(settings.pointSelector.minDistanceCm ?? 2.0);
  *   - enforceMinDistance?: boolean              -> whether consecutive taps must be at least
  *                                                  settings.json -> pointSelector.minDistanceCm apart.
  *                                                  Defaults to true; set false for login/verification.
+ *   - tapToRemoveLast?: boolean                 -> tapping on the most recently placed dot removes it;
+ *                                                  tapping on an earlier dot is rejected with an Alert.
+ *                                                  Defaults to settings.json -> pointSelector.tapToRemoveLast.
  *
  * If none of onCancel / showUndo / showReset / showConfirmButton apply, the
  * whole bottom action row is omitted, so the image gets that space too.
@@ -101,6 +106,7 @@ export default function PointSelector({
   saliencyMaxHighCount = 0,
   saliencyMinScore = settings.saliency.minScore,
   enforceMinDistance = true,
+  tapToRemoveLast = settings.pointSelector.tapToRemoveLast ?? true,
 }) {
   const [points, setPoints] = useState([]);
   const [boxSize, setBoxSize] = useState({ width: BOX_WIDTH, height: BOX_WIDTH });
@@ -144,11 +150,33 @@ export default function PointSelector({
   }, []);
 
   const handlePress = (e) => {
-    if (points.length >= maxPoints) return;
     const { locationX, locationY } = e.nativeEvent;
 
     const x = Math.min(Math.max(locationX / layout.width, 0), 1);
     const y = Math.min(Math.max(locationY / layout.height, 0), 1);
+
+    // Tapping ON an already placed dot (inside its drawn circle) never adds a
+    // point. If it is the most recent one it is removed - a quick undo that
+    // works even when all maxPoints are placed. Earlier points stay locked:
+    // removing one from the middle would silently renumber the rest of the
+    // sequence. Only active while the dots are visible.
+    if (tapToRemoveLast && showMarkers && points.length > 0) {
+      const distanceTo = (p) => Math.hypot((x - p.x) * layout.width, (y - p.y) * layout.height);
+      if (distanceTo(points[points.length - 1]) <= HIT_RADIUS) {
+        setPoints(points.slice(0, -1));
+        return;
+      }
+      const hitIndex = points.findIndex((p) => distanceTo(p) <= HIT_RADIUS);
+      if (hitIndex !== -1) {
+        Alert.alert(
+          'Μόνο το τελευταίο σημείο αφαιρείται',
+          `Το σημείο ${hitIndex + 1} δεν είναι το τελευταίο. Αφαίρεσε πρώτα τα επόμενα (πάτα πάνω στο σημείο ${points.length}) ή χρησιμοποίησε το Reset.`
+        );
+        return;
+      }
+    }
+
+    if (points.length >= maxPoints) return;
 
     // Consecutive points may not overlap or land too close to one another.
     // Distance is measured in actual on-screen RN layout points (derived
