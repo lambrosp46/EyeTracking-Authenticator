@@ -275,6 +275,11 @@ export function useGazeTracker(options = {}) {
     setPoseLockState({ locked: false, issue: null });
   }, []);
   const isPoseLockActive = useCallback(() => poseLockActiveRef.current, []);
+  /** Smoothed head pose (headPose.headMetrics units) while the pose lock is active, else null. */
+  const getPoseMetrics = useCallback(
+    () => (poseLockActiveRef.current ? poseLockRef.current.smoothed : null),
+    []
+  );
 
   const maybePublishReadout = useCallback((sample, point, valid) => {
     const now = Date.now();
@@ -479,6 +484,7 @@ export function useGazeTracker(options = {}) {
     poseLock,
     setPoseLockActive,
     isPoseLockActive,
+    getPoseMetrics,
 
     // calibration
     calibration,

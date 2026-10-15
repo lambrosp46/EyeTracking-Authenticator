@@ -189,7 +189,9 @@ export default function PositionGuide({
   const hintKey = verdict.ok ? 'ok' : verdict.primary;
   let hint = POSITION_HINTS[hintKey] ?? '';
   if (hasFace && (hintKey === 'tooClose' || hintKey === 'tooFar')) {
-    hint += ` (${Math.round(m.distanceCm)} cm, στόχος ${Math.round(cfg.targetDistanceCm)})`;
+    const dMin = Math.round(cfg.targetDistanceCm - cfg.distanceToleranceCm);
+    const dMax = Math.round(cfg.targetDistanceCm + cfg.distanceToleranceCm);
+    hint += ` (${Math.round(m.distanceCm)} cm, εντάξει ${dMin}–${dMax})`;
   }
   const softHint = verdict.soft.map((k) => POSITION_HINTS[k]).filter(Boolean).join(' ');
 
@@ -200,7 +202,7 @@ export default function PositionGuide({
         <Text style={styles.subtitle}>
           {subtitle ?? (isReturn
             ? 'Η στάση σου άλλαξε από τη βαθμονόμηση. Γύρνα στην ίδια θέση — συνεχίζουμε μόλις το πλαίσιο γίνει πράσινο.'
-            : `Βάλε το πρόσωπό σου μέσα στο πλαίσιο, περίπου ${cfg.targetDistanceCm} cm από την οθόνη. Η βαθμονόμηση ξεκινά μόνη της.`)}
+            : 'Κράτα το κινητό όπως το κρατάς συνήθως, με το πρόσωπο μέσα στο πλαίσιο. Η βαθμονόμηση ξεκινά μόνη της.')}
         </Text>
       </View>
 

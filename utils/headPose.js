@@ -146,19 +146,24 @@ export function evaluatePositioning(m, cfg, wasOk = false) {
   if (cfg.pitchRangeDeg) {
     // Pose lock after a two-pose calibration: while tracking (wasOk), any head
     // pitch between the first and the second calibration pose (+ a margin) is
-    // fine - the head-pose terms were fitted on exactly that range. Outside it
-    // the fit would extrapolate, so the user is sent back - to the FIRST pose,
-    // where the fit has the most data (12 targets).
+    // fine - the head-pose terms were fitted around that range. Outside it
+    // (+ exit margin) the lock engages. It releases once the pitch is back
+    // inside the range - or, if returnPitchToleranceDeg is set, only once it is
+    // that close to the FIRST pose. Pilot with new users: a ±1° return target
+    // could not be hit by feel (median lock 8 s, up to 53 s), so by default the
+    // range itself is the release condition, and smaller pose changes are
+    // handled by re-measuring (drift re-check), not by the user.
     const [lo, hi] = cfg.pitchRangeDeg;
     if (wasOk) {
       const e = cfg.pitchExitMarginDeg ?? 0.5;
       if (m.pitchDeg > hi + e) issues.push('chinDown');
       else if (m.pitchDeg < lo - e) issues.push('chinUp');
-    } else {
-      const t = cfg.returnPitchToleranceDeg ?? 1;
+    } else if (Number.isFinite(cfg.returnPitchToleranceDeg)) {
+      const t = cfg.returnPitchToleranceDeg;
       if (dPitch > t) issues.push('chinDown');
       else if (dPitch < -t) issues.push('chinUp');
-    }
+    } else if (m.pitchDeg > hi) issues.push('chinDown');
+    else if (m.pitchDeg < lo) issues.push('chinUp');
   } else if (dPitch > cfg.maxHeadPitchDeg * f) issues.push('chinDown');
   else if (dPitch < -cfg.maxHeadPitchDeg * f) issues.push('chinUp');
 
@@ -203,7 +208,7 @@ export function referenceConfig(cfg, ref) {
     ? {
         pitchRangeDeg: [Math.min(...span) - margin, Math.max(...span) + margin],
         pitchExitMarginDeg: pr.exitMarginDeg ?? 0.5,
-        returnPitchToleranceDeg: pr.returnToleranceDeg ?? 1,
+        returnPitchToleranceDeg: pr.returnToleranceDeg ?? null,
       }
     : { pitchRangeDeg: null };
   return {

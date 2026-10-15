@@ -56,14 +56,14 @@
   },
   "positioning": {
     "enabled": true,
-    "targetDistanceCm": 30,
-    "distanceToleranceCm": 3,
+    "targetDistanceCm": 32.5,
+    "distanceToleranceCm": 7.5,
     "targetEyeYFromTopCm": 2.5,
-    "eyeYToleranceCm": 3,
-    "eyeXToleranceCm": 3,
-    "maxHeadYawDeg": 10,
-    "maxHeadPitchDeg": 12,
-    "maxHeadRollDeg": 10,
+    "eyeYToleranceCm": 5,
+    "eyeXToleranceCm": 4,
+    "maxHeadYawDeg": 12,
+    "maxHeadPitchDeg": 18,
+    "maxHeadRollDeg": 12,
     "maxDeviceRotationDps": 20,
     "deviceTilt": {
       "mode": "hint",
@@ -80,28 +80,28 @@
     "logIntervalMs": 1000,
     "poseLock": {
       "enabled": true,
-      "distanceToleranceCm": 1.5,
-      "eyeXToleranceCm": 0.7,
-      "eyeYToleranceCm": 0.7,
-      "maxHeadYawDeg": 2,
-      "maxHeadPitchDeg": 2,
-      "maxHeadRollDeg": 3,
+      "distanceToleranceCm": 3.0,
+      "eyeXToleranceCm": 1.5,
+      "eyeYToleranceCm": 1.5,
+      "maxHeadYawDeg": 4,
+      "maxHeadPitchDeg": 3,
+      "maxHeadRollDeg": 5,
       "maxDeviceRotationDps": 25,
       "exitToleranceFactor": 1.5,
       "holdStillMs": 600,
       "pitchRange": {
         "enabled": true,
-        "marginDeg": 1.0,
-        "exitMarginDeg": 0.5,
-        "returnToleranceDeg": 1.0
+        "marginDeg": 3.0,
+        "exitMarginDeg": 1.0,
+        "returnToleranceDeg": null
       },
       "compensated": {
-        "distanceToleranceCm": 2.0,
-        "eyeXToleranceCm": 1.0,
-        "eyeYToleranceCm": 0.8,
-        "maxHeadYawDeg": 2.5,
-        "maxHeadPitchDeg": 2,
-        "maxHeadRollDeg": 3.5
+        "distanceToleranceCm": 3.0,
+        "eyeXToleranceCm": 1.5,
+        "eyeYToleranceCm": 1.5,
+        "maxHeadYawDeg": 4,
+        "maxHeadPitchDeg": 3,
+        "maxHeadRollDeg": 5
       }
     }
   },
@@ -119,7 +119,7 @@
     "targetDiameterCm": 1.2,
     "targetColor": "#FFD60A",
     "backgroundColor": "#000000",
-    "maxAcceptableErrorCm": 1.5,
+    "maxAcceptableErrorCm": 1.2,
     "dumpSamples": true,
     "secondPose": {
       "enabled": true,
@@ -171,6 +171,18 @@
         "firstWarmupMs": 900,
         "warmupMs": 600,
         "maxRounds": 2
+      },
+      "recheckOnPoseChange": {
+        "enabled": true,
+        "distanceCm": 1.5,
+        "eyeXCm": 0.8,
+        "eyeYCm": 0.8,
+        "yawDeg": 3,
+        "pitchDeg": 2,
+        "rollDeg": 4,
+        "holdMs": 600,
+        "cooldownMs": 2500,
+        "maxPerAttempt": 3
       }
     },
     "dwellMs": 900,

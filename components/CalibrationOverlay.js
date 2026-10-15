@@ -109,6 +109,10 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
   const [failure, setFailure] = useState(null);
   // false while the positioning step still has to run for this opening.
   const [positioned, setPositioned] = useState(!usePositioning);
+  // Bumped by "Ξαναδοκίμασε" after a rejected calibration (re-runs the effect
+  // when there is no positioning step to re-arm); tries counts them for the log.
+  const [run, setRun] = useState(0);
+  const triesRef = useRef(0);
 
   const pulse = useRef(new Animated.Value(1)).current;
   const cancelledRef = useRef(false);
@@ -118,6 +122,7 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
   // opening starts with it again (GazeTest opens the overlay repeatedly).
   useEffect(() => {
     if (!visible) {
+      triesRef.current = 0;
       setPositioned(!usePositioning);
       setPhase(usePositioning ? 'position' : 'intro'); // no flash of the first target on reopen
       positioningRef.current = null;
@@ -258,8 +263,8 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
 
       if (thinTargets.length > 0) {
         setFailure(
-          `Μόνο ${collected.length} έγκυρα δείγματα. Κράτα το κινητό σταθερό, περίπου ` +
-            `${settings.positioning?.targetDistanceCm ?? 30} cm από το πρόσωπο, με όλο το πρόσωπο ορατό, και δοκίμασε ξανά.`
+          `Μόνο ${collected.length} έγκυρα δείγματα. Κράτα το κινητό σταθερό, ` +
+            'με όλο το πρόσωπο ορατό και καλό φωτισμό, και δοκίμασε ξανά.'
         );
         setPhase('result');
         return;
@@ -291,6 +296,14 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
         return;
       }
       logCalibrationQuality('Calibration', fit.quality, modelLabel(fit.calibration));
+      triesRef.current += 1;
+      const looCm = fit.quality.loo?.rmseCm;
+      const limitCm = cfg.maxAcceptableErrorCm;
+      if (looCm != null && looCm > limitCm) {
+        console.log(
+          `[Calibration] REJECTED (try ${triesRef.current}): error at new points ${looCm.toFixed(2)}cm > limit ${limitCm}cm - the user has to calibrate again`
+        );
+      }
       // The pose the fit was made in travels with it: the pose lock and
       // [PoseDrift] compare against it. It is the MEAN pose over all the
       // calibration samples (the head moves a little with the gaze, e.g. drops
@@ -330,7 +343,14 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
       tracker.setPoseLockActive(lockWasActive);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, mode, positioned]);
+  }, [visible, mode, positioned, run]);
+
+  // Start over from the positioning step (rejected calibration).
+  const retry = () => {
+    positioningRef.current = null;
+    if (usePositioning) setPositioned(false);
+    else setRun((r) => r + 1);
+  };
 
   const accept = async () => {
     if (mode === 'calibrate' && result?.calibration) {
@@ -355,6 +375,12 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
       ? 'σφάλμα στα σημεία ελέγχου'
       : 'σφάλμα (RMSE)';
   const good = headlineCm != null && headlineCm <= cfg.maxAcceptableErrorCm;
+  // A new calibration whose error at points it has NOT seen (leave-one-out) is
+  // above the limit is refused: it cannot be saved, only redone. Pilot with new
+  // users: calibrations of 5.1 / 2.5 / 2.0 cm were accepted and every later
+  // step failed. (The old check looked at the in-sample fit error, which is
+  // always optimistic.) The accuracy check (validate) only reports.
+  const rejected = mode === 'calibrate' && !failure && q?.loo != null && !good;
   const looByKey = new Map((q?.loo?.perTarget ?? []).map((t) => [t.key, t]));
 
   return (
@@ -455,7 +481,7 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
               ) : (
                 <>
                   <Text style={styles.resultTitle}>
-                    {good ? 'Looking good' : 'Accuracy is low'}
+                    {good ? 'Looking good' : rejected ? 'Η βαθμονόμηση δεν πέτυχε' : 'Accuracy is low'}
                   </Text>
                   <Text style={styles.metric}>{headlineCm.toFixed(2)} cm</Text>
                   <Text style={styles.metricLabel}>{headlineLabel}</Text>
@@ -484,7 +510,10 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
                   <Text style={styles.hint}>
                     {good
                       ? `Εντός του στόχου ${cfg.maxAcceptableErrorCm} cm.`
-                      : `Πάνω από τον στόχο ${cfg.maxAcceptableErrorCm} cm. Δοκίμασε ξανά μένοντας πιο ακίνητος. Τα βελάκια δείχνουν προς τα πού πέφτει κάθε σημείο: αν δείχνουν όλα προς την ίδια μεριά, κουνήθηκες ή άλλαξες στάση.`}
+                      : rejected
+                        ? `Το σφάλμα είναι πάνω από ${cfg.maxAcceptableErrorCm} cm, οπότε η βαθμονόμηση πρέπει να γίνει ξανά. ` +
+                          'Κράτα το κινητό σταθερό, κοίτα το κέντρο κάθε κουκκίδας μέχρι να εξαφανιστεί, και μην κουνάς το κεφάλι. Βοηθάει και καλός φωτισμός στο πρόσωπο.'
+                        : `Πάνω από τον στόχο ${cfg.maxAcceptableErrorCm} cm. Δοκίμασε ξανά μένοντας πιο ακίνητος. Τα βελάκια δείχνουν προς τα πού πέφτει κάθε σημείο: αν δείχνουν όλα προς την ίδια μεριά, κουνήθηκες ή άλλαξες στάση.`}
                   </Text>
                 </>
               )}
@@ -493,7 +522,12 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
                 <Pressable style={[styles.button, styles.buttonGhost]} onPress={onClose}>
                   <Text style={styles.buttonGhostText}>Discard</Text>
                 </Pressable>
-                {!failure && (
+                {rejected && (
+                  <Pressable style={styles.button} onPress={retry}>
+                    <Text style={styles.buttonText}>Ξαναδοκίμασε</Text>
+                  </Pressable>
+                )}
+                {!failure && !rejected && (
                   <Pressable style={styles.button} onPress={accept}>
                     <Text style={styles.buttonText}>
                       {mode === 'validate' ? 'Done' : 'Save calibration'}

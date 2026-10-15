@@ -134,7 +134,7 @@ export default function RegisterScreen({ navigation }) {
   // Calibration finished — the fit lives only in the tracker for this session
   // (calibration is never stored) - move to gaze confirm.
   const handleCalibrationComplete = (result) => {
-    console.log('[Register] calibration complete:', result?.quality?.rmseCm, 'cm');
+    console.log('[Register] calibration complete: error at new points', result?.quality?.loo?.rmseCm ?? result?.quality?.rmseCm, 'cm');
     if (!result?.calibration) {
       abortToSelection();
       return;

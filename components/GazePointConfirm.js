@@ -250,28 +250,41 @@ export default function GazePointConfirm({
         setCorrection(null);
         if (res.status === 'failed') console.log('[DriftCheck] continuing WITHOUT correction');
       }
+      snapshotPose();
       setBusy(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [useDrift, imageRect != null]);
 
-  // ---- re-check after the pose lock ----------------------------------------
-  // Coming back from the pose lock, the head is back within the limits but not
-  // in exactly the same pose (pilot: the mapping moved 0.8-1.2 cm, and the next
-  // point landed 1.5 cm off while the four before were <= 0.5 cm). So before
-  // any further capture, a short check on a few neutral dots measures the
-  // correction again. Points captured before the lock stay as they are.
+  // ---- re-checks -------------------------------------------------------------
+  // The mapping moves whenever the head pose moves (the calibration multiplies
+  // the eye signal ~3x, and with it every pose change). Instead of making the
+  // user hold an exact pose - new users could not (median pose lock 8 s, up to
+  // 53 s) - the system re-measures: a short check on a few neutral dots before
+  // the next capture. Points captured before stay as they are. Two triggers:
+  //  - the pose lock was released (the head left the allowed range and came
+  //    back, but not to exactly the same pose: pilot, mapping moved 0.8-1.2 cm
+  //    and the next point landed 1.5 cm off);
+  //  - the pose drifted moderately from where the last check was measured,
+  //    without reaching the pose lock (recheckOnPoseChange).
   const recheckCfg = driftCfg.recheckAfterPoseLock ?? {};
+  const poseCfg = driftCfg.recheckOnPoseChange ?? {};
   const useRecheck = useDrift && recheckCfg.enabled === true;
-  const lockedNow = tracker.poseLock?.locked === true;
-  const prevLockedRef = useRef(lockedNow);
-  useEffect(() => {
-    const wasLocked = prevLockedRef.current;
-    prevLockedRef.current = lockedNow;
-    if (!useRecheck || !wasLocked || lockedNow) return; // only on a release
-    if (driftBusyRef.current || driftPhase !== 'done') return; // a check is already running
-    if (capturedRef.current.length >= expectedCount) return;
+  const usePoseRecheck = useRecheck && poseCfg.enabled === true && typeof tracker.getPoseMetrics === 'function';
+  // Pose at the end of the last check, and when the last check ended.
+  const poseAtCheckRef = useRef(null);
+  const lastCheckEndRef = useRef(0);
+  const poseRechecksRef = useRef(0);
+  const snapshotPose = () => {
+    const m = trackerRef.current.getPoseMetrics?.();
+    poseAtCheckRef.current = m ? { ...m } : null;
+    lastCheckEndRef.current = Date.now();
+  };
 
+  const startRecheck = (reason) => {
+    if (driftBusyRef.current || !aliveRef.current) return;
+    if (capturedRef.current.length >= expectedCount) return;
+    console.log(`[DriftRecheck] starting: ${reason}`);
     (async () => {
       const previous = correctionRef.current;
       bufferRef.current = [];
@@ -298,11 +311,64 @@ export default function GazePointConfirm({
         setCorrection(previous);
         console.log(`[DriftRecheck] ${res.status} - keeping the previous correction`);
       }
+      if (res.status !== 'aborted') snapshotPose();
       bufferRef.current = [];
       setBusy(false);
     })();
+  };
+
+  // Trigger 1: pose lock released.
+  const lockedNow = tracker.poseLock?.locked === true;
+  const prevLockedRef = useRef(lockedNow);
+  useEffect(() => {
+    const wasLocked = prevLockedRef.current;
+    prevLockedRef.current = lockedNow;
+    if (!useRecheck || !wasLocked || lockedNow) return; // only on a release
+    if (driftPhase !== 'done') return; // the initial check handles its own
+    startRecheck('pose lock released');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lockedNow]);
+
+  // Trigger 2: moderate pose change since the last check (held for holdMs, so
+  // a glance or a blink doesn't trigger it). Capped per attempt.
+  useEffect(() => {
+    if (!usePoseRecheck || driftPhase !== 'done') return undefined;
+    const limits = {
+      distanceCm: poseCfg.distanceCm ?? 1.5,
+      eyeXFromCenterCm: poseCfg.eyeXCm ?? 0.8,
+      eyeYFromTopCm: poseCfg.eyeYCm ?? 0.8,
+      yawDeg: poseCfg.yawDeg ?? 3,
+      pitchDeg: poseCfg.pitchDeg ?? 2,
+      rollDeg: poseCfg.rollDeg ?? 4,
+    };
+    let beyondSince = null;
+    const id = setInterval(() => {
+      const ref = poseAtCheckRef.current;
+      const m = trackerRef.current.getPoseMetrics?.();
+      if (!ref || !m || trackerRef.current.poseLock?.locked || driftBusyRef.current) {
+        beyondSince = null;
+        return;
+      }
+      if (poseRechecksRef.current >= (poseCfg.maxPerAttempt ?? 3)) return;
+      if (Date.now() - lastCheckEndRef.current < (poseCfg.cooldownMs ?? 2500)) return;
+      const over = Object.entries(limits).filter(
+        ([k, lim]) => m[k] != null && ref[k] != null && Math.abs(m[k] - ref[k]) > lim
+      );
+      if (over.length === 0) {
+        beyondSince = null;
+        return;
+      }
+      const now = Date.now();
+      if (beyondSince == null) beyondSince = now;
+      if (now - beyondSince < (poseCfg.holdMs ?? 600)) return;
+      beyondSince = null;
+      poseRechecksRef.current += 1;
+      const what = over.map(([k]) => `${k} ${(m[k] - ref[k] >= 0 ? '+' : '')}${(m[k] - ref[k]).toFixed(1)}`).join(', ');
+      startRecheck(`pose changed since the last check (${what}) [${poseRechecksRef.current}/${poseCfg.maxPerAttempt ?? 3}]`);
+    }, 150);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [usePoseRecheck, driftPhase]);
 
   const stabilityRadius = cmToPoints(cfg.stabilityRadiusCm);
   const releaseRadius = cmToPoints(cfg.releaseRadiusCm);

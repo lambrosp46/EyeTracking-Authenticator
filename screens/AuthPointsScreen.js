@@ -169,11 +169,12 @@ export default function AuthPointsScreen({ route, navigation }) {
       }
       calibrationDoneRef.current = true;
 
-      if (result.quality?.rmseCm != null) {
+      const errCm = result.quality?.loo?.rmseCm ?? result.quality?.rmseCm;
+      if (errCm != null) {
         const limit = settings.calibration.maxAcceptableErrorCm;
         console.log(
-          `[GazeLogin] calibration rmse ${result.quality.rmseCm.toFixed(2)}cm ` +
-            `(limit ${limit}cm)${result.quality.rmseCm > limit ? ' -- ABOVE LIMIT' : ''}`
+          `[GazeLogin] calibration error at new points ${errCm.toFixed(2)}cm ` +
+            `(limit ${limit}cm)${errCm > limit ? ' -- ABOVE LIMIT' : ''}`
         );
       }
 
