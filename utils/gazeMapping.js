@@ -191,7 +191,8 @@ function fitModel(samples, model, ridge, headLambda = null) {
 }
 
 /** 'quadratic+head' etc., for logs and the result screen. */
-export const modelLabel = (calibration) => `${calibration.model}${calibration.head ? '+head' : ''}`;
+export const modelLabel = (calibration) =>
+  `${calibration.model}${calibration.head ? '+head' : ''}${calibration.prior ? ' (+shared pose model)' : ''}`;
 
 const targetKey = (s) => s.targetIndex ?? `${s.targetX}|${s.targetY}`;
 
@@ -258,8 +259,19 @@ export function crossValidateTargets(samples, model, ridge = 1e-6, headLambda = 
  *   leave-one-target-out error)
  * @returns {{ok: boolean, reason?: string, calibration?: object, quality?: object}}
  */
-export function fitCalibration(samples, config = {}) {
+export function fitCalibration(rawSamples, config = {}) {
   const ridge = config.ridge ?? 1e-6;
+  // Shared head-pose model (config.headPrior): its correction is taken out of
+  // the targets before fitting and added back in applyCalibration, so the fit
+  // (and the per-user head terms, if any) only learn what is left - this
+  // user's deviation from the shared model.
+  const prior = makeHeadPrior(config.headPrior, rawSamples);
+  const samples = prior
+    ? rawSamples.map((s) => {
+        const d = priorShift(prior, s);
+        return { ...s, targetX: s.targetX - d.x, targetY: s.targetY - d.y };
+      })
+    : rawSamples;
   const requested = config.model ?? 'affine';
 
   const distinctTargets = groupByTarget(samples).size;
@@ -298,20 +310,23 @@ export function fitCalibration(samples, config = {}) {
 
   const calibration = {
     ...best.fit,
+    ...(prior ? { prior } : {}),
     sampleCount: samples.length,
     targetCount: distinctTargets,
     createdAt: new Date().toISOString(),
     version: 2,
   };
 
-  const quality = evaluateCalibration(calibration, samples);
+  // against the REAL targets (applyCalibration adds the prior back); the LOO
+  // offsets above are the same in both spaces, the prior shift cancels out
+  const quality = evaluateCalibration(calibration, rawSamples);
   quality.loo = best.loo;
   quality.modelSelection = tried.map((t) => ({ model: t.model, looRmseCm: t.loo?.rmseCm ?? null }));
 
   return { ok: true, calibration, quality };
 }
 
-/** `sample` carries the head pose; only used by head-compensated calibrations. */
+/** `sample` carries the head pose; used by head-compensated calibrations and the shared head prior. */
 export function applyCalibration(calibration, sx, sy, sample = null) {
   const b = normalizedBasis(calibration, sx, sy, sample);
   let x = 0;
@@ -319,6 +334,41 @@ export function applyCalibration(calibration, sx, sy, sample = null) {
   for (let i = 0; i < b.length; i++) {
     x += b[i] * calibration.coefX[i];
     y += b[i] * calibration.coefY[i];
+  }
+  if (calibration.prior) {
+    const d = priorShift(calibration.prior, sample);
+    x += d.x;
+    y += d.y;
+  }
+  return { x, y };
+}
+
+/**
+ * Shared head-pose model (settings.calibration.headPrior): how far the mapped
+ * point moves, in cm, per unit change of [face yaw °, face pitch °, eye-midpoint
+ * x, y, z cm] (headFeatures), learnt across many calibrations. It corrects for
+ * pose changes even for a user whose own calibration cannot (one pose, or a
+ * second pose too close to the first). Centred on this calibration's mean pose.
+ */
+function makeHeadPrior(cfg, samples) {
+  if (!cfg || cfg.enabled !== true) return null;
+  const cx = cfg.coefXCmPerUnit;
+  const cy = cfg.coefYCmPerUnit;
+  if (!Array.isArray(cx) || !Array.isArray(cy) || cx.length !== 5 || cy.length !== 5) return null;
+  const hs = samples.map(headFeatures).filter(Boolean);
+  if (hs.length < samples.length * 0.9) return null;
+  const mean = hs[0].map((_, i) => hs.reduce((a, h) => a + h[i], 0) / hs.length);
+  return { mean, coefX: cx.map(cmToPoints), coefY: cy.map(cmToPoints) };
+}
+
+function priorShift(prior, sample) {
+  // no pose for this sample -> the mean pose, i.e. no correction
+  const h = headFeatures(sample) ?? prior.mean;
+  let x = 0;
+  let y = 0;
+  for (let i = 0; i < h.length; i++) {
+    x += (h[i] - prior.mean[i]) * prior.coefX[i];
+    y += (h[i] - prior.mean[i]) * prior.coefY[i];
   }
   return { x, y };
 }

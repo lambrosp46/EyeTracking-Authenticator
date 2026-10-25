@@ -64,7 +64,7 @@ export default function RegisterScreen({ navigation }) {
     if (pointsStage !== 'gaze') return undefined;
     trackerRef.current.setPoseLockActive(true);
     return () => trackerRef.current.setPoseLockActive(false);
-  }, [pointsStage]);
+  }, [pointsStage, selectorKey]); // on again when the confirm view restarts
   const poseLocked = pointsStage === 'gaze' && tracker.poseLock?.locked && tracker.calibration?.pose;
 
   // Runs saliency analysis (Vision) right after the image is uploaded, then
@@ -152,6 +152,9 @@ export default function RegisterScreen({ navigation }) {
   // in order, within the same tolerance login will use. This is the only place
   // that stores `points`; it still does NOT touch the database.
   const handleGazeConfirmed = (gazePoints, meta) => {
+    // The pass is over: no pose lock while the result is shown (the user
+    // lowers the phone to read it). It comes back on when the view restarts.
+    trackerRef.current.setPoseLockActive(false);
     // Verification rule: the gaze dot and the tapped dot count as the same
     // point when their circles TOUCH, i.e. centre-to-centre distance <= the sum
     // of the two radii. Both are drawn at dotDiameterCm, so that sum is one

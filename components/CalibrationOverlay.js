@@ -14,6 +14,7 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import settings from '../config/settings.json';
 import PositionGuide from './PositionGuide';
 import CalibrationHowto from './CalibrationHowto';
+import RegripStep from './RegripStep';
 import { writeToLogFile } from '../utils/sessionLog';
 import { hasReferencePose, headMetrics, screenGeometry } from '../utils/headPose';
 import { pointsToCm } from '../utils/gazeMapping';
@@ -105,7 +106,10 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
 
   const [index, setIndex] = useState(0);
   const [current, setCurrent] = useState(null);
-  const [phase, setPhase] = useState(usePositioning ? 'position' : 'intro'); // position | intro | warmup | collect | pose2 | return | computing | result
+  // "Before you start" instructions (calibrate only), once per opening.
+  const useHowto = mode === 'calibrate' && cfg.instructions?.enabled === true;
+  const firstPhase = useHowto ? 'howto' : usePositioning ? 'position' : 'intro';
+  const [phase, setPhase] = useState(firstPhase); // howto | position | intro | warmup | collect | retry | pose2 | return | computing | result
   const [result, setResult] = useState(null);
   const [failure, setFailure] = useState(null);
   // false while the positioning step still has to run for this opening.
@@ -114,11 +118,16 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
   // when there is no positioning step to re-arm); tries counts them for the log.
   const [run, setRun] = useState(0);
   const triesRef = useRef(0);
-  // "Before you start" instructions (calibrate only), once per opening.
-  const useHowto = mode === 'calibrate' && cfg.instructions?.enabled === true;
   const [howtoDone, setHowtoDone] = useState(!useHowto);
   // Message shown when a target is redone (head turned / gaze not steady).
   const [retryMsg, setRetryMsg] = useState(null);
+  // Filling target: 0..1 of the steady gaze needed, and why it is paused.
+  const fillAnim = useRef(new Animated.Value(0)).current;
+  const [fillState, setFillState] = useState('ok'); // ok | pause | head
+  const setFill = (v, immediate = false) => {
+    if (immediate) fillAnim.setValue(v);
+    else Animated.timing(fillAnim, { toValue: v, duration: 180, easing: Easing.linear, useNativeDriver: true }).start();
+  };
 
   const pulse = useRef(new Animated.Value(1)).current;
   const cancelledRef = useRef(false);
@@ -131,10 +140,10 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
       triesRef.current = 0;
       setHowtoDone(!useHowto);
       setPositioned(!usePositioning);
-      setPhase(usePositioning ? 'position' : 'intro'); // no flash of the first target on reopen
+      setPhase(firstPhase); // no flash of the positioning guide / first target on reopen
       positioningRef.current = null;
     }
-  }, [visible, usePositioning]);
+  }, [visible, usePositioning, firstPhase]);
 
   const handlePositioned = (snapshot) => {
     positioningRef.current = snapshot;
@@ -242,6 +251,87 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
         gaze: 'Κράτα το βλέμμα σταθερά στο κέντρο της κουκκίδας',
       };
 
+      // ---- filling target ---------------------------------------------------
+      // The dot fills while the gaze is steady and the head still, and pauses
+      // otherwise (suggested by a test user: you see how long to look, and
+      // whether you are doing it right). Samples are collected in short chunks;
+      // only steady chunks count and are kept. "Steady" can only mean steady,
+      // not "on the dot": before the calibration exists, where the user looks
+      // on the screen is unknown. Thresholds from the logged calibrations:
+      // a trained user's chunks pass ~97% of the time, a new user's ~85%.
+      const lastPauseRef = { current: 'ok' };
+      const collectSteady = async () => {
+        const chunkMs = checks.chunkMs ?? 200;
+        const need = cfg.dwellMs;
+        const maxMs = cfg.maxCollectMs ?? 4000;
+        const maxSpread = checks.chunkMaxSpreadCm ?? 0.2;
+        const maxAway = checks.chunkMaxAwayCm ?? 0.3;
+        const t0 = Date.now();
+        let kept = [];
+        let steadyMs = 0;
+        let anchor = null;
+        let awayRun = 0;
+        setFill(0, true);
+        setFillState('ok');
+        lastPauseRef.current = 'ok';
+        while (steadyMs < need && Date.now() - t0 < maxMs) {
+          tracker.beginCollect();
+          await wait(chunkMs);
+          const chunk = tracker.endCollect();
+          if (cancelledRef.current) return { samples: [], done: false };
+          if (chunk.length < 3) {
+            // blink or face lost: pause
+            setFillState('pause');
+            lastPauseRef.current = 'pause';
+            continue;
+          }
+          const cx = median(chunk.map((q) => q.sx));
+          const cy = median(chunk.map((q) => q.sy));
+          const spread = 100 * Math.hypot(mad(chunk.map((q) => q.sx)), mad(chunk.map((q) => q.sy)));
+          if (useChecks && headRefs.yaw.length) {
+            const h = meanPose(chunk, window, 3);
+            if (
+              h &&
+              (Math.abs(h.yawDeg - median(headRefs.yaw)) > (checks.maxHeadYawDeg ?? 2.5) ||
+                Math.abs(h.pitchDeg - median(headRefs.pitch)) > (checks.maxHeadPitchDeg ?? 3.5))
+            ) {
+              setFillState('head');
+              lastPauseRef.current = 'head';
+              continue;
+            }
+          }
+          if (spread > maxSpread) {
+            setFillState('pause');
+            lastPauseRef.current = 'pause';
+            continue;
+          }
+          const away = anchor ? 100 * Math.hypot(cx - anchor.x, cy - anchor.y) : 0;
+          if (away > maxAway) {
+            // the eye settled somewhere else: if it stays there, start over
+            // from the new place (the first chunks were probably the eye
+            // still arriving at the dot)
+            awayRun += 1;
+            setFillState('pause');
+            lastPauseRef.current = 'pause';
+            if (awayRun >= 2) {
+              kept = [];
+              steadyMs = 0;
+              anchor = null;
+              awayRun = 0;
+              setFill(0);
+            }
+            continue;
+          }
+          awayRun = 0;
+          kept = kept.concat(chunk);
+          steadyMs += chunkMs;
+          anchor = { x: median(kept.map((q) => q.sx)), y: median(kept.map((q) => q.sy)) };
+          setFillState('ok');
+          setFill(Math.min(1, steadyMs / need));
+        }
+        return { samples: kept, done: steadyMs >= need };
+      };
+
       // One target: warm-up (eye still travelling, discarded), then collect.
       const runTarget = async (target, targetIndex, n, into) => {
         setIndex(n);
@@ -251,12 +341,16 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
           await wait(cfg.warmupMs);
           if (cancelledRef.current) return false;
           setPhase('collect');
-          tracker.beginCollect();
-          await wait(cfg.dwellMs);
-          const samples = tracker.endCollect();
+          const { samples, done } = await collectSteady();
           if (cancelledRef.current) return false;
 
-          const { head, problem } = checkTarget(samples);
+          let { head, problem } = checkTarget(samples);
+          if (!done && !problem) {
+            problem = {
+              reason: lastPauseRef.current === 'head' ? 'head' : 'gaze',
+              detail: `the dot did not fill in ${cfg.maxCollectMs ?? 4000}ms (${lastPauseRef.current})`,
+            };
+          }
           if (problem && attempt < (checks.maxRetries ?? 2)) {
             console.log(`[Calibration] target ${targetIndex + 1} redone (${attempt + 1}): ${problem.detail}`);
             setRetryMsg(RETRY_TEXT[problem.reason]);
@@ -285,9 +379,14 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
       // (100 + n) so cross-validation treats them as separate points.
       let secondPass = [];
       const poseA = useSecondPose ? meanPose(collected, window) : null;
+      const regrip = (secondCfg.mode ?? 'regrip') === 'regrip';
       if (useSecondPose && poseA) {
-        setPose2Target({ ...poseA, pitchDeg: poseA.pitchDeg + (secondCfg.pitchOffsetDeg ?? 3) });
-        setPhase('pose2');
+        if (regrip) {
+          setPhase('regrip');
+        } else {
+          setPose2Target({ ...poseA, pitchDeg: poseA.pitchDeg + (secondCfg.pitchOffsetDeg ?? 3) });
+          setPhase('pose2');
+        }
         const snapshot = await new Promise((resolve) => {
           pose2ResolveRef.current = resolve;
         });
@@ -315,6 +414,9 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
         }
 
         // ---- back to the first pose ----------------------------------
+        // Only for the old head-tilt second pose. After a re-grip the user is
+        // simply in their usual pose; the pose lock's pitch range covers both.
+        if (!regrip) {
         // Strict pose-lock limits (no `compensated` flag on this reference).
         setReturnTarget(poseA);
         setPhase('return');
@@ -327,6 +429,7 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
           `[Calibration] back to first pose ${back?.skipped ? 'SKIPPED' : 'ok'} after ${back?.timeToPositionMs ?? '-'}ms` +
             (back?.pitchDeg != null ? `: pitch ${back.pitchDeg.toFixed(1)}° (first pose ${poseA.pitchDeg.toFixed(1)}°)` : '')
         );
+        }
       }
 
       setPhase('computing');
@@ -483,6 +586,10 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
             />
           )}
 
+          {visible && phase === 'regrip' && (
+            <RegripStep tracker={tracker} onReady={(snap) => pose2ResolveRef.current?.(snap)} onCancel={onClose} />
+          )}
+
           {visible && phase === 'pose2' && pose2Target && (
             <PositionGuide
               tracker={tracker}
@@ -495,7 +602,7 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
             />
           )}
 
-          {phase !== 'result' && phase !== 'position' && phase !== 'pose2' && phase !== 'return' && phase !== 'howto' && (
+          {phase !== 'result' && phase !== 'position' && phase !== 'pose2' && phase !== 'return' && phase !== 'howto' && phase !== 'regrip' && (
             <>
               <Animated.View
                 style={[
@@ -506,12 +613,32 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
                     width: targetSize,
                     height: targetSize,
                     borderRadius: targetSize / 2,
-                    backgroundColor: collecting ? cfg.targetColor : 'transparent',
-                    borderColor: cfg.targetColor,
+                    backgroundColor: 'transparent',
+                    borderColor: !collecting
+                      ? cfg.targetColor
+                      : fillState === 'head'
+                        ? '#FF9F0A'
+                        : fillState === 'pause'
+                          ? '#8E8E93'
+                          : cfg.targetColor,
+                    borderWidth: collecting ? 3 : 2,
                     transform: [{ scale: collecting ? 1 : pulse }],
                   },
                 ]}
               >
+                {/* fills from the centre while the gaze is steady (collectSteady) */}
+                {collecting && (
+                  <Animated.View
+                    style={[
+                      StyleSheet.absoluteFill,
+                      {
+                        borderRadius: targetSize / 2,
+                        backgroundColor: fillState === 'head' ? '#FF9F0A' : cfg.targetColor,
+                        transform: [{ scale: fillAnim }],
+                      },
+                    ]}
+                  />
+                )}
                 <View style={[styles.targetCore, { backgroundColor: collecting ? '#000' : cfg.targetColor }]} />
               </Animated.View>
 
@@ -529,7 +656,11 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
                     : tracker.poseLock?.locked
                       ? 'Η στάση σου άλλαξε — γύρνα στη θέση της βαθμονόμησης'
                       : collecting
-                        ? 'Συνέχισε να κοιτάς την κουκκίδα'
+                        ? fillState === 'head'
+                          ? 'Μόνο τα μάτια — κράτα το κεφάλι ακίνητο'
+                          : fillState === 'pause'
+                            ? 'Κράτα το βλέμμα στο κέντρο της κουκκίδας'
+                            : 'Κοίτα την κουκκίδα μέχρι να γεμίσει'
                         : 'Κοίτα την κουκκίδα'}
                 </Text>
                 <Text style={styles.hudCount}>
@@ -647,7 +778,7 @@ function mad(values) {
 }
 
 /** Average head pose over the collected samples, in headPose.headMetrics units. */
-function meanPose(samples, window) {
+function meanPose(samples, window, minCount = 10) {
   const geom = screenGeometry(settings.eyeTracking.screen, window, pointsToCm);
   const keys = ['distanceCm', 'eyeXFromCenterCm', 'eyeYFromTopCm', 'yawDeg', 'pitchDeg', 'rollDeg', 'deviceTiltDeg'];
   const sum = Object.fromEntries(keys.map((k) => [k, 0]));
@@ -661,7 +792,7 @@ function meanPose(samples, window) {
       count[k] += 1;
     }
   }
-  if (count.distanceCm < 10) return null;
+  if (count.distanceCm < minCount) return null;
   return Object.fromEntries(keys.map((k) => [k, count[k] ? sum[k] / count[k] : null]));
 }
 

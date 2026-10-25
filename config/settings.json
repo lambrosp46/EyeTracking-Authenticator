@@ -130,17 +130,32 @@
       "maxHeadPitchDeg": 3.5,
       "maxRawJitterCm": 0.35,
       "maxRetries": 2,
-      "messageMs": 1600
+      "messageMs": 1600,
+      "chunkMs": 200,
+      "chunkMaxSpreadCm": 0.2,
+      "chunkMaxAwayCm": 0.3
     },
+    "maxCollectMs": 4000,
     "dumpSamples": true,
     "secondPose": {
       "enabled": true,
+      "mode": "regrip",
+      "faceLostMs": 300,
+      "moveRotationDps": 60,
+      "moveDistanceCm": 6,
+      "skipAfterMs": 6000,
       "pitchOffsetDeg": 3,
       "pitchToleranceDeg": 1.5,
       "eyeYToleranceCm": 1.5,
       "eyeXToleranceCm": 1.0,
       "distanceToleranceCm": 2.0,
       "targetIndices": [0, 2, 4, 7, 9, 11]
+    },
+    "headPrior": {
+      "enabled": false,
+      "coefXCmPerUnit": [-0.359, 0.11, -0.323, -0.037, -0.119],
+      "coefYCmPerUnit": [0.468, -0.555, -0.144, -0.961, 1.04],
+      "source": "32 calibrations (12 + 6 targets in a second pose), 5+ users, one iPhone, 14-15 Oct 2026"
     },
     "headCompensation": {
       "enabled": true,
