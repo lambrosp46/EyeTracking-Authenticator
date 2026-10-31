@@ -80,6 +80,37 @@ export function writeToLogFile(line) {
   buffer.push(`${new Date().toISOString()} DATA ${line}`);
 }
 
+/**
+ * Opens the share sheet with EVERY session log on the phone, joined into one
+ * file (oldest first), each starting with a line `===== FILE <name> =====`.
+ * Easier than pulling the app container with Xcode; tools/parseGazeLog.mjs
+ * reads the joined file as it is. The copy goes to the cache folder (the
+ * system may clear it); the originals stay in Documents/logs.
+ */
+export async function shareAllSessionLogs() {
+  flush();
+  const dir = new Directory(Paths.document, LOG_DIR);
+  const logs = dir.exists
+    ? dir
+        .list()
+        .filter((f) => f instanceof File && f.name.endsWith('.log'))
+        .sort((a, b) => a.name.localeCompare(b.name))
+    : [];
+  if (logs.length === 0) throw new Error('Δεν υπάρχουν αρχεία log στο κινητό.');
+
+  const outDir = new Directory(Paths.cache, 'log-export');
+  if (outDir.exists) outDir.delete(); // only the latest export is kept
+  outDir.create({ intermediates: true, idempotent: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const out = new File(outDir, `all-logs-${stamp}.log`);
+  out.create({ overwrite: true });
+  for (const f of logs) {
+    const text = await f.text();
+    await out.write(`===== FILE ${f.name} =====\n${text}${text.endsWith('\n') ? '' : '\n'}`, { append: true });
+  }
+  return Share.share({ url: out.uri, title: `${logs.length} logs` });
+}
+
 /** Opens the iOS share sheet with the current session's log file. */
 export async function shareSessionLog() {
   flush();

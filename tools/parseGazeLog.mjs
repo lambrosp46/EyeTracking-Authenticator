@@ -11,7 +11,8 @@
  *                       events: [{type, t, …}], end, calibrationAt }
  *                     ([GazeStream], written by useGazeTracker while a login /
  *                     registration gaze screen is open)
- * `calibrationAt` links a stream to the calibration it ran on (the last one
+ * A joined export ("Αποστολή όλων των logs") works as is: `file` is then
+ * the original log's name. `calibrationAt` links a stream to the calibration it ran on (the last one
  * before it in the same file). Event `t` is on the same clock as the samples'
  * `timestamp`, so events can be placed exactly in the stream.
  */
@@ -26,6 +27,15 @@ export function parseLog(text, file = '') {
   let cal = null;
   let lastCalAt = null;
   for (const line of text.split('\n')) {
+    // "Αποστολή όλων των logs" joins every session log into one file, each
+    // starting with this line: records keep the name of the log they came from.
+    const fileMark = line.match(/^===== FILE (.+) =====$/);
+    if (fileMark) {
+      file = fileMark[1];
+      cal = null;
+      lastCalAt = null;
+      continue;
+    }
     let i = line.indexOf('[CalibrationData] ');
     if (i >= 0) {
       const rest = line.slice(i + 18);
