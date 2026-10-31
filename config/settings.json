@@ -24,6 +24,10 @@
     "maxHighSaliencyPoints": 2
   },
   "eyeTracking": {
+    "streamLog": {
+      "enabled": true,
+      "chunkRows": 40
+    },
     "updateIntervalMs": 33,
     "rayMode": "eyeTransforms",
     "useLeftEye": true,
@@ -80,7 +84,7 @@
     "logDiagnostics": true,
     "logIntervalMs": 1000,
     "poseLock": {
-      "enabled": true,
+      "enabled": false,
       "distanceToleranceCm": 3.0,
       "eyeXToleranceCm": 1.5,
       "eyeYToleranceCm": 1.5,
@@ -149,7 +153,8 @@
       "eyeYToleranceCm": 1.5,
       "eyeXToleranceCm": 1.0,
       "distanceToleranceCm": 2.0,
-      "targetIndices": [0, 2, 4, 7, 9, 11]
+      "firstPoseTargetIndices": null,
+      "targetIndices": [0, 1, 2, 3, 5, 7, 9, 10, 11]
     },
     "headPrior": {
       "enabled": false,

@@ -4,9 +4,11 @@ import { Animated, AppState, Dimensions } from 'react-native';
 import * as GazeTracker from '../modules/gaze-tracker';
 import settings from '../config/settings.json';
 import { GazeFilter2D } from '../utils/oneEuroFilter';
+import { writeToLogFile } from '../utils/sessionLog';
 import {
   applyCalibration,
   clampToScreen,
+  modelLabel,
   pointsToCm,
   rawToScreenPoints,
 } from '../utils/gazeMapping';
@@ -20,6 +22,23 @@ import {
 } from '../utils/headPose';
 
 const OFFSCREEN = -9999;
+
+/**
+ * Gaze stream: every native sample, valid or not, while a screen records
+ * (startStream ... stopStream). Columns: STREAM_BASE, then RAW_EXTRAS.
+ *   valid   1 = the sample was used for gaze, 0 = rejected (blink, no face,
+ *           out of range, or blocked by the pose lock)
+ *   locked  1 = the pose lock was blocking samples
+ *   fx, fy  calibrated point BEFORE the drift correction (window points)
+ *   x, y    final point (drift correction + smoothing), what the screen used
+ * With the calibration data dump this is enough to replay a whole login
+ * offline with any calibration model, drift algorithm or capture rule.
+ */
+const STREAM_BASE = ['timestamp', 'valid', 'locked', 'sx', 'sy', 'fx', 'fy', 'x', 'y'];
+const STREAM_POINT_KEYS = new Set(['fx', 'fy', 'x', 'y']);
+// Module level, not per hook: every screen has its own tracker hook, and the
+// ids must stay unique for the whole app session (one log file).
+let streamCounter = 0;
 
 /** Native sample fields copied into calibration samples, for the data dump. */
 export const RAW_EXTRAS = [
@@ -91,6 +110,8 @@ export function useGazeTracker(options = {}) {
   const geom = useMemo(() => screenGeometry(cfg.screen, window, pointsToCm), [window, cfg.screen]);
   const lastReadoutRef = useRef(0);
   const rateRef = useRef({ count: 0, since: 0, hz: 0 });
+  // Gaze stream recording (see STREAM_BASE): { id, rows, lastTimestamp } or null
+  const streamRef = useRef(null);
 
   // ---------------------------------------------------------------- MARK: sample
   const handleSample = useCallback(
@@ -136,6 +157,7 @@ export function useGazeTracker(options = {}) {
         filterRef.current.reset();
         latestRef.current = { ...latestRef.current, valid: false, timestamp: sample.timestamp };
         maybePublishReadout(sample, null, false);
+        recordStream(sample, false, poseBlocked, null, null);
         onSampleCallback?.({ ...sample, valid: false });
         return;
       }
@@ -187,12 +209,45 @@ export function useGazeTracker(options = {}) {
       }
 
       maybePublishReadout(sample, final, true);
+      recordStream(sample, true, poseBlocked, fitted, final);
       onSampleCallback?.({ ...sample, valid: true, point: final });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [window.width, window.height, onSampleCallback]
   );
 
+  // ---------------------------------------------------------- MARK: gaze stream
+  const streamCfg = settings.eyeTracking?.streamLog ?? {};
+  const STREAM_CHUNK = streamCfg.chunkRows ?? 40;
+  const roundStream = (key, v) => {
+    if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+    return STREAM_POINT_KEYS.has(key) ? Math.round(v * 10) / 10 : Math.round(v * 1e5) / 1e5;
+  };
+  const flushStream = () => {
+    const st = streamRef.current;
+    if (!st || st.rows.length === 0) return;
+    writeToLogFile(`[GazeStream] rows ${st.id} ${JSON.stringify(st.rows)}`);
+    st.rows = [];
+  };
+  const recordStream = (sample, valid, locked, fitted, final) => {
+    const st = streamRef.current;
+    if (!st) return;
+    const row = [
+      roundStream('timestamp', sample.timestamp),
+      valid ? 1 : 0,
+      locked ? 1 : 0,
+      roundStream('sx', sample.sx),
+      roundStream('sy', sample.sy),
+      roundStream('fx', fitted?.x),
+      roundStream('fy', fitted?.y),
+      roundStream('x', final?.x),
+      roundStream('y', final?.y),
+    ];
+    for (const key of RAW_EXTRAS) row.push(roundStream(key, sample[key]));
+    st.rows.push(row);
+    st.lastTimestamp = sample.timestamp;
+    if (st.rows.length >= STREAM_CHUNK) flushStream();
+  };
   // Once a second: how far the head has moved since the calibration was fitted.
   // A calibration only holds for the pose it was made in, so this is the first
   // thing to look at when the cursor lands off target. Pose only - no gaze.
@@ -229,11 +284,14 @@ export function useGazeTracker(options = {}) {
   const updatePoseLock = (sample) => {
     const lockCfg = settings.positioning?.poseLock;
     const ref = calibrationRef.current?.pose;
-    if (!poseLockActiveRef.current || !lockCfg?.enabled || !hasReferencePose(calibrationRef.current)) return false;
+    if (!poseLockActiveRef.current || !hasReferencePose(calibrationRef.current)) return false;
 
+    // The smoothed pose is measured even with the lock disabled: the drift
+    // re-check on pose change (GazePointConfirm) runs on it.
     const st = poseLockRef.current;
     const m = sample.isTracked && sample.headZCm != null ? headMetrics(sample, geom) : null;
     st.smoothed = m ? smoothMetrics(st.smoothed, m, settings.positioning.smoothing ?? 1) : null;
+    if (!lockCfg?.enabled) return false; // measure only: never blocks, never asks to go back
     const rcfg = referenceConfig(settings.positioning, ref);
     const now = Date.now();
 
@@ -275,7 +333,11 @@ export function useGazeTracker(options = {}) {
     setPoseLockState({ locked: false, issue: null });
   }, []);
   const isPoseLockActive = useCallback(() => poseLockActiveRef.current, []);
-  /** Smoothed head pose (headPose.headMetrics units) while the pose lock is active, else null. */
+  /**
+   * Smoothed head pose (headPose.headMetrics units) while the pose lock is
+   * active (setPoseLockActive), else null - also when poseLock.enabled is
+   * false: then the pose is only measured, nothing is blocked.
+   */
   const getPoseMetrics = useCallback(
     () => (poseLockActiveRef.current ? poseLockRef.current.smoothed : null),
     []
@@ -441,6 +503,57 @@ export function useGazeTracker(options = {}) {
     filterRef.current.reset();
   }, []);
 
+  /**
+   * Start recording the gaze stream (to the log file only). `meta` should say
+   * which screen and what the image rect is; the calibration in use and the
+   * drift correction are added here. Returns the stream id, or null when
+   * disabled. A running stream is closed first.
+   */
+  const startStream = useCallback((label, meta = {}) => {
+    if (streamCfg.enabled !== true) return null;
+    if (streamRef.current) stopStream('replaced');
+    streamCounter += 1;
+    const id = `${label}-${streamCounter}`;
+    const c = calibrationRef.current;
+    writeToLogFile(
+      `[GazeStream] start ${id} ${JSON.stringify({
+        id,
+        at: new Date().toISOString(),
+        window: { width: window.width, height: window.height },
+        keys: [...STREAM_BASE, ...RAW_EXTRAS],
+        calibration: c ? { model: modelLabel(c), looCm: c.quality?.loo?.rmseCm ?? null, pose: c.pose ?? null } : null,
+        drift: driftRef.current,
+        poseLockActive: poseLockActiveRef.current,
+        ...meta,
+      })}`
+    );
+    streamRef.current = { id, rows: [], lastTimestamp: latestRef.current?.timestamp ?? null };
+    return id;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [window.width, window.height]);
+
+  /**
+   * Something happened on screen (a drift dot, a capture, a correction...).
+   * `t` is the timestamp of the last recorded sample (same clock as the rows),
+   * so offline the event can be placed exactly in the stream.
+   */
+  const streamEvent = useCallback((type, data = {}) => {
+    const st = streamRef.current;
+    if (!st) return;
+    flushStream(); // rows before the event stay before it in the file
+    writeToLogFile(`[GazeStream] event ${st.id} ${JSON.stringify({ type, t: st.lastTimestamp, at: Date.now(), ...data })}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const stopStream = useCallback((reason = 'stop') => {
+    const st = streamRef.current;
+    if (!st) return;
+    flushStream();
+    writeToLogFile(`[GazeStream] end ${st.id} ${JSON.stringify({ reason, t: st.lastTimestamp, at: Date.now() })}`);
+    streamRef.current = null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   /** Start buffering raw samples (used by the calibration overlay). */
   const beginCollect = useCallback(() => {
     collectingRef.current = [];
@@ -479,6 +592,11 @@ export function useGazeTracker(options = {}) {
 
     // drift check (see GazePointConfirm)
     setDriftCorrection,
+
+    // gaze stream recording (offline replay, see STREAM_BASE)
+    startStream,
+    streamEvent,
+    stopStream,
 
     // pose lock (see updatePoseLock)
     poseLock,

@@ -154,6 +154,8 @@ export default function GazePointConfirm({
 
   useEffect(() => {
     imageRectRef.current = imageRect;
+    if (imageRect) streamEvent('imageRect', { rect: imageRect });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imageRect]);
 
   // false once this screen unmounts: every running check stops.
@@ -175,7 +177,24 @@ export default function GazePointConfirm({
   const setCorrection = (c) => {
     correctionRef.current = c;
     trackerRef.current.setDriftCorrection(c);
+    streamEvent('correction', { correction: c ?? null });
   };
+
+  // Gaze stream (offline replay): everything the tracker sees while this
+  // screen is open, plus the events below (drift dots, fits, captures).
+  const streamEvent = (type, data) => trackerRef.current.streamEvent?.(type, data);
+  useEffect(() => {
+    const mode = hasExpected ? 'register' : config ? 'login' : 'confirm';
+    trackerRef.current.startStream?.(mode, {
+      screen: mode,
+      expectedCount,
+      capture: { dwellMs: cfg.dwellMs, stabilityRadiusCm: cfg.stabilityRadiusCm, releaseRadiusCm: cfg.releaseRadiusCm, pollIntervalMs: cfg.pollIntervalMs },
+      matchToleranceCm: cfg.matchToleranceCm,
+      driftCheck: useDrift ? driftCfg : null,
+    });
+    return () => trackerRef.current.stopStream?.('screen closed');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // The correction belongs to this screen only.
   useEffect(() => {
@@ -209,10 +228,20 @@ export default function GazePointConfirm({
         await wait(i === 0 ? firstWarmupMs : warmupMs);
         if (stop()) return { status: 'aborted' };
         setDriftDot({ nx, ny, n: i + 1, total: points.length, collecting: true });
+        const r0 = imageRectRef.current;
+        streamEvent('driftDotStart', {
+          label, round, n: i + 1, nx, ny,
+          tx: r0 ? r0.x + nx * r0.width : null,
+          ty: r0 ? r0.y + ny * r0.height : null,
+        });
         t.beginCollect();
         await wait(driftCfg.dwellMs ?? 1000);
         const samples = t.endCollect();
-        if (stop()) return { status: 'aborted' };
+        streamEvent('driftDotEnd', { label, round, n: i + 1, samples: samples.length });
+        if (stop()) {
+          streamEvent('driftAborted', { label, round });
+          return { status: 'aborted' };
+        }
         const rect = imageRectRef.current;
         if (!rect || samples.length < (driftCfg.minSamples ?? 8)) {
           offsets.push(null);
@@ -227,6 +256,10 @@ export default function GazePointConfirm({
       const rect = imageRectRef.current;
       if (!rect) return { status: 'failed' };
       const fit = fitDriftCorrection(offsets, { top: rect.y, bottom: rect.y + rect.height }, driftCfg, pointsToCm);
+      streamEvent('driftFit', {
+        label, round, ok: fit.ok, reason: fit.reason ?? null, residualCm: fit.residualCm ?? null,
+        maxCm: fit.maxCm ?? null, correction: fit.correction ?? null, offsets,
+      });
       console.log(
         `[${label}] round ${round}: offsets cm ${offsets.map(fmt).join(' ')}` +
           (fit.correction ? ` · ${describeDrift(fit, pointsToCm)}` : ` · ${fit.reason}`)
@@ -318,6 +351,7 @@ export default function GazePointConfirm({
     if (driftBusyRef.current || !aliveRef.current) return;
     if (capturedRef.current.length >= expectedCount) return;
     console.log(`[DriftRecheck] starting: ${reason}`);
+    streamEvent('recheckStart', { reason });
     (async () => {
       const previous = correctionRef.current;
       bufferRef.current = [];
@@ -450,6 +484,10 @@ export default function GazePointConfirm({
             `${((point.y - imageRect.y) / imageRect.height).toFixed(4)})`
         );
       }
+      streamEvent('capture', {
+        n: next.length, x: point.x, y: point.y,
+        nx: (point.x - imageRect.x) / imageRect.width, ny: (point.y - imageRect.y) / imageRect.height,
+      });
       capturedRef.current = next;
       setCaptured(next);
       bufferRef.current = [];
@@ -507,7 +545,13 @@ export default function GazePointConfirm({
 
       const buf = bufferRef.current;
       buf.push({ ...g, t: now });
-      while (buf.length && now - buf[0].t > cfg.dwellMs) buf.shift();
+      // Keep exactly one sample at least dwellMs old, so `held` reaches
+      // dwellMs once the gaze has been steady that long. (Dropping every
+      // sample older than dwellMs, as before, left `held` just below dwellMs:
+      // with a 40 ms poll it only got there when timer jitter happened to land
+      // on exactly dwellMs - captures took 0.4 s to 7 s, and a long steady
+      // look could pass without one while a later glance got captured.)
+      while (buf.length > 1 && now - buf[1].t >= cfg.dwellMs) buf.shift();
 
       if (buf.length < 3) return;
 
@@ -565,6 +609,7 @@ export default function GazePointConfirm({
                   (maxIgnored > 0 ? ` [${ign.count}/${maxIgnored}]` : '')
               );
             }
+            streamEvent('ignoredFixation', { n: index + 1, x: cx, y: cy, distanceCm, count: ign.count });
             bufferRef.current = [];
             setDwellProgress(0);
             setOffTargetHint(true);
@@ -584,6 +629,7 @@ export default function GazePointConfirm({
   }, [cfg, imageRect, captured.length, armed, expectedCount, commit, releaseRadius, stabilityRadius, tracker, driftPhase, filterOffTarget, offTargetToleranceCm]);
 
   const undo = () => {
+    streamEvent('undo', { n: capturedRef.current.length });
     clearIgnored();
     const next = capturedRef.current.slice(0, -1);
     capturedRef.current = next;
@@ -595,6 +641,7 @@ export default function GazePointConfirm({
   };
 
   const reset = () => {
+    streamEvent('reset', { n: capturedRef.current.length });
     clearIgnored();
     capturedRef.current = [];
     setCaptured([]);

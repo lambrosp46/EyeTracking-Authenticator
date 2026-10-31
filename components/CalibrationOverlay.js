@@ -60,7 +60,13 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
   // The accuracy check uses DIFFERENT points from the calibration when
   // calibration.validationPoints is set: an error measured on the very points
   // the fit was made on says little about the points in between.
-  const targets = useMemo(
+  // Second pose (calibrate only): after the main pass, the user changes pose
+  // (re-grip) and targets are repeated. Seeing two poses is what lets the fit
+  // learn - and later subtract - the effect of head pose.
+  const secondCfg = cfg.secondPose ?? {};
+  const useSecondPose = mode === 'calibrate' && secondCfg.enabled === true && usePositioning;
+  // Every target of the pattern; each pose uses a subset of it.
+  const patternTargets = useMemo(
     () =>
       buildTargets(
         mode === 'validate' && Array.isArray(cfg.validationPoints) && cfg.validationPoints.length >= 3
@@ -70,18 +76,21 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
       ),
     [cfg, mode, window.width, window.height]
   );
-  const targetSize = cmToPoints(cfg.targetDiameterCm);
-
-  // Second pose (calibrate only): after the main pass, the user changes head
-  // pitch a little and a subset of the targets is repeated. Seeing two poses is
-  // what lets the fit learn - and later subtract - the effect of head pose.
-  const secondCfg = cfg.secondPose ?? {};
-  const useSecondPose = mode === 'calibrate' && secondCfg.enabled === true && usePositioning;
-  const secondTargets = useMemo(
-    () =>
-      (secondCfg.targetIndices ?? []).filter((i) => i >= 0 && i < targets.length).map((i) => ({ ...targets[i], from: i })),
+  const pick = (indices) =>
+    (indices ?? []).filter((i) => Number.isInteger(i) && i >= 0 && i < patternTargets.length).map((i) => ({ ...patternTargets[i], from: i }));
+  // First pass: the whole pattern, or secondPose.firstPoseTargetIndices when
+  // set (e.g. 6 here + 12 in the second pose: the second pose is the one the
+  // user is in at login - their natural grip - so it gets more targets).
+  const targets = useMemo(() => {
+    const sub = useSecondPose ? pick(secondCfg.firstPoseTargetIndices) : [];
+    return sub.length >= 3 ? sub : patternTargets;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [targets]
+  }, [patternTargets, useSecondPose]);
+  const targetSize = cmToPoints(cfg.targetDiameterCm);
+  const secondTargets = useMemo(
+    () => pick(secondCfg.targetIndices),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [patternTargets]
   );
   const totalTargets = targets.length + (useSecondPose ? secondTargets.length : 0);
   const pose2Overrides = useMemo(
@@ -158,9 +167,20 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
     setPositioned(true);
   };
 
-  // pulsing target so the eye has something to lock onto
+  // Pulsing target only on the very first dot, while the eye looks for it
+  // (warm-up): after that the user knows where dots appear, and a dot that
+  // grows and shrinks on every target looked jumpy (tester, 31/10). Every
+  // other dot keeps one size. The ring's scale ALWAYS comes from this one
+  // animated value: switching a native-driven transform to a plain number
+  // left it frozen at whatever size the pulse had at that moment.
+  const pulsingNow = phase === 'warmup' && index === 0;
   useEffect(() => {
     if (!visible) return undefined;
+    if (!pulsingNow) {
+      pulse.stopAnimation();
+      Animated.timing(pulse, { toValue: 1, duration: 250, easing: Easing.inOut(Easing.quad), useNativeDriver: true }).start();
+      return undefined;
+    }
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(pulse, { toValue: 1.35, duration: 700, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
@@ -169,7 +189,7 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
     );
     loop.start();
     return () => loop.stop();
-  }, [visible, pulse]);
+  }, [visible, pulse, pulsingNow]);
 
   useEffect(() => {
     if (!visible) return undefined;
@@ -622,7 +642,7 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
                           ? '#8E8E93'
                           : cfg.targetColor,
                     borderWidth: collecting ? 3 : 2,
-                    transform: [{ scale: collecting ? 1 : pulse }],
+                    transform: [{ scale: pulse }],
                   },
                 ]}
               >
