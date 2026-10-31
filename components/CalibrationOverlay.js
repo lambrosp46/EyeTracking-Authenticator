@@ -662,36 +662,19 @@ export default function CalibrationOverlay({ visible, mode = 'calibrate', tracke
                 <View style={[styles.targetCore, { backgroundColor: collecting ? '#000' : cfg.targetColor }]} />
               </Animated.View>
 
-              <SafeAreaView style={styles.hud} pointerEvents="box-none">
-                <Text style={styles.hudTitle}>
-                  {mode === 'validate' ? 'Έλεγχος ακρίβειας' : inSecondPose ? 'Βαθμονόμηση · δεύτερη στάση' : 'Βαθμονόμηση'}
-                </Text>
-                <Text style={[styles.hudBody, phase === 'retry' && styles.hudWarn]}>
-                  {phase === 'retry'
-                    ? retryMsg
-                    : phase === 'intro'
-                    ? inSecondPose || index === targets.length - 1
-                      ? 'Μείνε σε αυτή τη νέα στάση. Κράτα το κεφάλι ακίνητο και κοίτα κάθε κουκκίδα μόνο με τα μάτια.'
-                      : 'Κράτα το κεφάλι ακίνητο και κοίτα κάθε κουκκίδα μόνο με τα μάτια.'
-                    : tracker.poseLock?.locked
-                      ? 'Η στάση σου άλλαξε — γύρνα στη θέση της βαθμονόμησης'
-                      : collecting
-                        ? fillState === 'head'
-                          ? 'Μόνο τα μάτια — κράτα το κεφάλι ακίνητο'
-                          : fillState === 'pause'
-                            ? 'Κράτα το βλέμμα στο κέντρο της κουκκίδας'
-                            : 'Κοίτα την κουκκίδα μέχρι να γεμίσει'
-                        : 'Κοίτα την κουκκίδα'}
-                </Text>
-                <Text style={styles.hudCount}>
-                  {index + 1} / {totalTargets}
-                </Text>
+              {/* Nothing but the dots during the calibration (tester, 31/10:
+                  the instructions and the Cancel button under the dots were
+                  confusing). The rules are on the "Πριν ξεκινήσεις" screen,
+                  the fill/colour of the dot says whether it is going well, and
+                  only the reason a dot is redone is shown. Leaving is still
+                  possible before the dots start (instructions / positioning). */}
+              <SafeAreaView style={styles.hud} pointerEvents="none">
+                {phase === 'retry' && !!retryMsg && (
+                  <Text style={[styles.hudBody, styles.hudWarn]}>{retryMsg}</Text>
+                )}
                 <View style={styles.progressTrack}>
                   <View style={[styles.progressFill, { width: `${((index + (collecting ? 1 : 0)) / totalTargets) * 100}%` }]} />
                 </View>
-                <Pressable onPress={onClose} hitSlop={12} style={styles.cancel}>
-                  <Text style={styles.cancelText}>Cancel</Text>
-                </Pressable>
               </SafeAreaView>
             </>
           )}
