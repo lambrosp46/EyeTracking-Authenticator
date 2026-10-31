@@ -38,8 +38,9 @@ export default function App() {
             component={ToolsScreen}
             options={{ title: 'Εργαλεία' }}
           />
-          <Stack.Screen name="Register" component={RegisterScreen} />
-          <Stack.Screen name="Login" component={LoginScreen} />
+          {/* Login/Register έχουν δικό τους "‹ Αρχική" (components/ui.js), όπως το Home. */}
+          <Stack.Screen name="Register" component={RegisterScreen} options={{ headerShown: false }} />
+          <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
           <Stack.Screen
             name="AuthPoints"
             component={AuthPointsScreen}

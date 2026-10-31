@@ -24,7 +24,7 @@ import { cmToPoints } from '../utils/gazeMapping';
  * the header (`options={{ headerShown: false }}`) or the cursor will sit lower
  * than where the user is actually looking by the height of that header.
  */
-export default function GazeTestScreen() {
+export default function GazeTestScreen({ navigation }) {
   const tracker = useGazeTracker();
   const [overlay, setOverlay] = useState(null); // null | 'calibrate' | 'validate'
   const [showGrid, setShowGrid] = useState(false);
@@ -39,6 +39,19 @@ export default function GazeTestScreen() {
     <View style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+          {/* Η οθόνη δεν έχει header (βλ. σχόλιο πάνω), οπότε δικό της "Πίσω".
+              Το tracker σταματά μόνο του στο unmount (useGazeTracker). */}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Πίσω στα Εργαλεία"
+            hitSlop={8}
+            onPress={() => navigation.goBack()}
+            style={({ pressed }) => [styles.back, pressed && styles.buttonPressed]}
+          >
+            <Text style={styles.backChevron}>‹</Text>
+            <Text style={styles.backText}>Εργαλεία</Text>
+          </Pressable>
+
           <Text style={styles.title}>Gaze tracking test</Text>
           <Text style={styles.subtitle}>
             ARKit face tracking, projected onto the screen plane. Debug harness only.
@@ -272,6 +285,18 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#0B0B0F' },
   safe: { flex: 1 },
   scroll: { padding: 20, paddingBottom: 48, gap: 14 },
+
+  back: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    minHeight: 44,
+    marginLeft: -6,
+    marginBottom: -8,
+    paddingRight: 8,
+  },
+  backChevron: { color: '#0A84FF', fontSize: 30, lineHeight: 32, marginRight: 2 },
+  backText: { color: '#0A84FF', fontSize: 17 },
 
   title: { color: '#FFF', fontSize: 26, fontWeight: '700' },
   subtitle: { color: 'rgba(255,255,255,0.45)', fontSize: 14, lineHeight: 20, marginTop: -6 },

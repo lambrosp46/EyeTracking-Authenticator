@@ -1,7 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TextInput, Image, TouchableOpacity, ScrollView, ActivityIndicator, Alert, Modal } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Alert, Modal } from 'react-native';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
 import { useAuth } from '../hooks/useAuth';
+import {
+  BackLink,
+  COLORS,
+  InstitutionHeader,
+  PickerField,
+  PrimaryButton,
+  ScreenTitle,
+  TextField,
+  layout,
+} from '../components/ui';
 import ImageCapture from '../components/ImageCapture';
 import PointSelector from '../components/PointSelector';
 import settings from '../config/settings.json';
@@ -254,90 +264,88 @@ export default function RegisterScreen({ navigation }) {
   // The only place that actually writes to the database.
   const handleRegister = async () => {
     if (!username.trim()) {
-      Alert.alert('Missing username', 'Please enter a username first.');
+      Alert.alert('Λείπει το username', 'Πληκτρολογήστε ένα username στο βήμα 1.');
       return;
     }
     if (!imageUri || !points) {
-      Alert.alert('Incomplete', 'Please select an image and your 5 points first.');
+      Alert.alert('Η εγγραφή δεν ολοκληρώθηκε', 'Ανεβάστε εικόνα και επιλέξτε τα σημεία σας.');
       return;
     }
 
     try {
       await register(username, imageUri, points);
-      Alert.alert('Success', 'Registration saved.');
+      Alert.alert('Η εγγραφή ολοκληρώθηκε', 'Μπορείτε τώρα να συνδεθείτε με το βλέμμα σας.');
       navigation?.goBack?.();
     } catch (err) {
-      Alert.alert('Error', err.message || 'Something went wrong while saving.');
+      Alert.alert('Η αποθήκευση απέτυχε', err.message || 'Δοκιμάστε ξανά.');
     }
   };
 
   return (
     <SafeAreaProvider>
-      <SafeAreaView style={styles.container}>
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={true}>
-          <View style={styles.header}>
-            <Image source={require('../assets/logo-pan-patron.gif')} style={styles.logo} />
-            <Text style={styles.registerTitle}>Τμήμα Μηχανικών Η/Υ & Πληροφορικής</Text>
-          </View>
+      <SafeAreaView style={layout.screen} edges={['top', 'bottom']}>
+        <ScrollView contentContainerStyle={layout.scroll} keyboardShouldPersistTaps="handled">
+          <BackLink onPress={() => navigation.goBack()} />
 
-          <View style={styles.inputContainer}>
-            <Text style={styles.registerText}>Username</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Πληκτρολογήστε username"
-              placeholderTextColor="#6b7280"
+          <InstitutionHeader compact />
+
+          <ScreenTitle
+            title="Εγγραφή"
+            lead="Ο κωδικός σας είναι σημεία σε μια δική σας εικόνα. Στη σύνδεση θα τα κοιτάζετε αντί να πληκτρολογείτε."
+          />
+
+          <View style={styles.form}>
+            <TextField
+              label="Username"
+              placeholder="π.χ. Lambros"
               returnKeyType="done"
               value={username}
               onChangeText={setUsername}
               autoCapitalize="none"
               autoCorrect={false}
+              textContentType="username"
               editable={!loading}
             />
 
-            <ImageCapture
-              imageUri={imageUri}
-              onImageCapture={handleImageCapture}
-              label="Ανεβάστε εικόνα για κωδικό"
-              showPreview={false}
+            <View>
+              <ImageCapture
+                imageUri={imageUri}
+                onImageCapture={handleImageCapture}
+                label="Εικόνα κωδικού"
+                showPreview={false}
+              />
+              <Text style={styles.helper}>
+                Μια φωτογραφία με αρκετές λεπτομέρειες κάνει τα σημεία πιο εύκολα να τα θυμάστε.
+              </Text>
+            </View>
+
+            <PickerField
+              label="Σημεία"
+              state={saliencyLoading ? 'loading' : points ? 'done' : 'empty'}
+              actionLabel={
+                saliencyLoading ? 'Ανάλυση εικόνας…' : points ? 'Αλλαγή σημείων' : 'Επιλογή σημείων'
+              }
+              disabled={!imageUri || loading}
+              onPress={openPointsModal}
+              helper={
+                !imageUri
+                  ? 'Ανεβάστε πρώτα μια εικόνα.'
+                  : points
+                    ? 'Τα σημεία επιλέχθηκαν και επιβεβαιώθηκαν με το βλέμμα.'
+                    : 'Πατήστε τα σημεία σας στην εικόνα και επιβεβαιώστε τα κοιτάζοντάς τα.'
+              }
+              helperTone={points ? 'success' : undefined}
             />
-
-            {imageUri && saliencyLoading && (
-              <View style={styles.loadingRow}>
-                <ActivityIndicator />
-                <Text style={styles.loadingText}>Ανάλυση εικόνας…</Text>
-              </View>
-            )}
-
-            {imageUri && !saliencyLoading && !points && !loading && (
-              <TouchableOpacity onPress={openPointsModal} style={styles.secondaryButton}>
-                <Text style={styles.secondaryButtonText}>Επιλογή σημείων</Text>
-              </TouchableOpacity>
-            )}
-
-            {imageUri && points && !loading && (
-              <TouchableOpacity onPress={openPointsModal} style={styles.secondaryButton}>
-                <Text style={styles.secondaryButtonText}>Αλλαγή σημείων</Text>
-              </TouchableOpacity>
-            )}
-
-            {loading && (
-              <View style={styles.loadingRow}>
-                <ActivityIndicator />
-                <Text style={styles.loadingText}>Saving…</Text>
-              </View>
-            )}
-
-            {points && !loading && (
-              <>
-                <View style={styles.successBox}>
-                  <Text style={styles.successText}>✓ {points.length} σημεία επιλέχθηκαν</Text>
-                </View>
-                <TouchableOpacity style={styles.registerButton} onPress={handleRegister}>
-                  <Text style={styles.registerButtonText}>Register</Text>
-                </TouchableOpacity>
-              </>
-            )}
           </View>
+
+          <PrimaryButton
+            label="Ολοκλήρωση εγγραφής"
+            onPress={handleRegister}
+            disabled={!username.trim() || !imageUri || !points}
+            loading={loading}
+            loadingLabel="Αποθήκευση…"
+            style={styles.cta}
+          />
         </ScrollView>
       </SafeAreaView>
 
@@ -421,104 +429,23 @@ export default function RegisterScreen({ navigation }) {
   );
 }
 
+
 const styles = StyleSheet.create({
   poseLockOverlay: {
     backgroundColor: 'rgba(0,0,0,0.94)',
     zIndex: 10,
   },
-  container: {
-    flex: 1,
-    backgroundColor: '#f9fafb',
+  form: {
+    gap: 22,
   },
-  scrollContent: {
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 20,
-  },
-  header: {
-    alignItems: 'center',
-    marginBottom: 32,
-  },
-  logo: {
-    width: 110,
-    height: 110,
-    marginBottom: 16,
-  },
-  registerTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#111827',
-    textAlign: 'center',
-  },
-  inputContainer: {
-    width: '100%',
-    backgroundColor: '#ffffff',
-    borderRadius: 20,
-    padding: 18,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 6,
-  },
-  registerText: {
+  helper: {
+    marginTop: 6,
     fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 8,
-    alignSelf: 'flex-start',
+    lineHeight: 19,
+    color: COLORS.muted,
   },
-  input: {
-    width: '100%',
-    height: 52,
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    borderRadius: 14,
-    backgroundColor: '#f8fafc',
-    paddingHorizontal: 16,
-    fontSize: 16,
-    color: '#111827',
-  },
-  secondaryButton: {
-    marginTop: 12,
-    alignSelf: 'flex-start',
-  },
-  secondaryButtonText: {
-    color: '#4f46e5',
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  loadingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 16,
-  },
-  loadingText: {
-    fontSize: 14,
-    color: '#555',
-  },
-  successBox: {
-    marginTop: 16,
-    padding: 12,
-    backgroundColor: '#e8f5e9',
-    borderRadius: 12,
-  },
-  successText: {
-    color: '#2e7d32',
-    fontWeight: '600',
-  },
-  registerButton: {
-    marginTop: 16,
-    height: 52,
-    borderRadius: 14,
-    backgroundColor: '#4f46e5',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  registerButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#ffffff',
+  cta: {
+    marginTop: 32,
   },
   modalContainer: {
     flex: 1,

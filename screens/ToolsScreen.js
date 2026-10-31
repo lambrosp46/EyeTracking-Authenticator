@@ -6,31 +6,34 @@ import { shareSessionLog } from '../utils/sessionLog';
 /**
  * Εργαλεία έρευνας / debug. Δεν είναι μέρος της ροής του συμμετέχοντα.
  * Για νέο εργαλείο: πρόσθεσε μια εγγραφή στο TOOLS.
+ * opensScreen: true → δείχνει "›" (ανοίγει νέα οθόνη). false → ενέργεια επί τόπου.
  */
 const TOOLS = [
   {
     key: 'gaze-test',
     title: 'Δοκιμή Eye Tracker',
-    description: 'Βαθμονόμηση, επικύρωση και ζωντανός δείκτης βλέμματος.',
+    description: 'Βαθμονόμηση, έλεγχος ακρίβειας και ζωντανός δείκτης βλέμματος.',
+    opensScreen: true,
     run: (navigation) => navigation.navigate('Test Eye Tracker'),
   },
   {
     key: 'share-logs',
     title: 'Αποστολή logs',
-    description: 'Κοινοποίηση του αρχείου καταγραφής αυτής της εκκίνησης (AirDrop, Αρχεία, Mail).',
-    run: () => shareSessionLog().catch((e) => Alert.alert('Logs', e.message)),
+    description: 'Στέλνει το αρχείο καταγραφής αυτής της εκκίνησης μέσω AirDrop, Αρχείων ή Mail.',
+    opensScreen: false,
+    run: () => shareSessionLog().catch((e) => Alert.alert('Αποστολή logs', e.message)),
   },
 ];
 
 export default function ToolsScreen({ navigation }) {
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.sectionLabel}>ΕΡΕΥΝΑ & DEBUG</Text>
-
       <View style={styles.group}>
         {TOOLS.map((tool, i) => (
           <Pressable
             key={tool.key}
+            accessibilityRole="button"
+            accessibilityHint={tool.description}
             onPress={() => tool.run(navigation)}
             style={({ pressed }) => [
               styles.row,
@@ -42,13 +45,17 @@ export default function ToolsScreen({ navigation }) {
               <Text style={styles.rowTitle}>{tool.title}</Text>
               <Text style={styles.rowDescription}>{tool.description}</Text>
             </View>
-            <Text style={styles.chevron}>›</Text>
+            {tool.opensScreen && (
+              <Text style={styles.chevron} importantForAccessibility="no">
+                ›
+              </Text>
+            )}
           </Pressable>
         ))}
       </View>
 
       <Text style={styles.note}>
-        Τα εργαλεία αυτά προορίζονται για τον ερευνητή και όχι για τους συμμετέχοντες.
+        Τα εργαλεία αυτά είναι για τον ερευνητή, όχι για τους συμμετέχοντες.
       </Text>
     </ScrollView>
   );
@@ -62,27 +69,17 @@ const styles = StyleSheet.create({
   content: {
     padding: 20,
   },
-  sectionLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#6b7280',
-    letterSpacing: 0.6,
-    marginBottom: 8,
-    marginLeft: 4,
-  },
   group: {
     backgroundColor: '#ffffff',
-    borderRadius: 16,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#e5e7eb',
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
+    minHeight: 64,
     paddingVertical: 14,
     paddingHorizontal: 16,
     backgroundColor: '#ffffff',
@@ -99,25 +96,25 @@ const styles = StyleSheet.create({
     paddingRight: 12,
   },
   rowTitle: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '600',
     color: '#111827',
   },
   rowDescription: {
     marginTop: 3,
-    fontSize: 13,
+    fontSize: 14,
     color: '#6b7280',
-    lineHeight: 18,
+    lineHeight: 19,
   },
   chevron: {
-    fontSize: 22,
+    fontSize: 24,
     color: '#9ca3af',
   },
   note: {
     marginTop: 12,
     marginHorizontal: 4,
-    fontSize: 12,
-    color: '#9ca3af',
-    lineHeight: 17,
+    fontSize: 13,
+    color: '#6b7280',
+    lineHeight: 18,
   },
 });

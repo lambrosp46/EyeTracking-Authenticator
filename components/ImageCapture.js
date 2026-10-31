@@ -148,7 +148,7 @@ export default function ImageCapture({
               <Image source={{ uri: imageUri }} style={styles.preview} />
             ) : (
               <Text style={styles.placeholderText}>
-                {busy ? 'Loading…' : 'Tap to add image'}
+                {busy ? 'Φόρτωση…' : 'Πατήστε για εικόνα'}
               </Text>
             )}
           </TouchableOpacity>
@@ -170,7 +170,7 @@ export default function ImageCapture({
             <Text style={styles.compactBadgeText}>{imageUri ? '✓' : '+'}</Text>
           </View>
           <Text style={styles.compactText}>
-            {busy ? 'Loading…' : imageUri ? 'Αλλαγή εικόνας' : 'Προσθήκη εικόνας'}
+            {busy ? 'Φόρτωση…' : imageUri ? 'Αλλαγή εικόνας' : 'Προσθήκη εικόνας'}
           </Text>
         </TouchableOpacity>
       )}
@@ -182,11 +182,12 @@ const styles = StyleSheet.create({
   container: {
     width: '100%',
     alignItems: 'center',
-    marginVertical: 12,
+    marginVertical: 0, // το κενό το δίνει ο γονέας (βήμα στο Register)
   },
   label: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '600',
+    color: '#111827',
     marginBottom: 8,
     alignSelf: 'flex-start',
   },
@@ -212,28 +213,29 @@ const styles = StyleSheet.create({
   },
   changeText: {
     marginTop: 8,
-    color: '#007AFF',
+    color: '#4f46e5',
     fontSize: 14,
   },
   compactRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    alignSelf: 'flex-start',
+    alignSelf: 'stretch',
+    minHeight: 52,
     paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    backgroundColor: '#fafafa',
+    paddingHorizontal: 16,
+    borderRadius: 14,
+    backgroundColor: '#ffffff',
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: '#d1d5db',
   },
   compactBadge: {
     width: 22,
     height: 22,
     borderRadius: 11,
-    backgroundColor: '#ccc',
+    backgroundColor: '#4f46e5',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 8,
+    marginRight: 10,
   },
   compactBadgeDone: {
     backgroundColor: '#22c55e',
@@ -244,8 +246,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   compactText: {
-    color: '#007AFF',
-    fontSize: 14,
+    color: '#4f46e5',
+    fontSize: 16,
     fontWeight: '600',
   },
 });

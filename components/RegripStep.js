@@ -73,9 +73,9 @@ export default function RegripStep({ tracker, onReady, onCancel }) {
   return (
     <SafeAreaView style={styles.root}>
       <View style={styles.body}>
-        <Text style={styles.title}>Ένα λεπτό διάλειμμα</Text>
+        <Text style={styles.title}>Άφησε το κινητό κάτω</Text>
         <Text style={styles.text}>
-          Άφησε για λίγο το κινητό κάτω και ξαναπάρ' το όπως το κρατάς συνήθως.
+          Για 1–2 δευτερόλεπτα, και μετά ξαναπάρ' το όπως το κρατάς συνήθως.
         </Text>
         <Text style={styles.note}>
           Έτσι η εφαρμογή μαθαίνει πώς αλλάζει το βλέμμα σου όταν αλλάζεις λίγο τη στάση σου.
