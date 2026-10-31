@@ -155,23 +155,14 @@ export default function PointSelector({
     const x = Math.min(Math.max(locationX / layout.width, 0), 1);
     const y = Math.min(Math.max(locationY / layout.height, 0), 1);
 
-    // Tapping ON an already placed dot (inside its drawn circle) never adds a
-    // point. If it is the most recent one it is removed - a quick undo that
-    // works even when all maxPoints are placed. Earlier points stay locked:
-    // removing one from the middle would silently renumber the rest of the
-    // sequence. Only active while the dots are visible.
+    // Tapping ON the most recently placed dot removes it - a quick undo that
+    // works even when all maxPoints are placed. Tapping on an earlier dot is
+    // an ordinary tap: it is added as a new point (the same spot may appear
+    // twice, just not consecutively). Only active while the dots are visible.
     if (tapToRemoveLast && showMarkers && points.length > 0) {
-      const distanceTo = (p) => Math.hypot((x - p.x) * layout.width, (y - p.y) * layout.height);
-      if (distanceTo(points[points.length - 1]) <= HIT_RADIUS) {
+      const last = points[points.length - 1];
+      if (Math.hypot((x - last.x) * layout.width, (y - last.y) * layout.height) <= HIT_RADIUS) {
         setPoints(points.slice(0, -1));
-        return;
-      }
-      const hitIndex = points.findIndex((p) => distanceTo(p) <= HIT_RADIUS);
-      if (hitIndex !== -1) {
-        Alert.alert(
-          'Μόνο το τελευταίο σημείο αφαιρείται',
-          `Το σημείο ${hitIndex + 1} δεν είναι το τελευταίο. Αφαίρεσε πρώτα τα επόμενα (πάτα πάνω στο σημείο ${points.length}) ή χρησιμοποίησε το Reset.`
-        );
         return;
       }
     }

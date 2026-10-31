@@ -71,7 +71,9 @@ export default function LoginScreen({ navigation }) {
               onChangeText={setUsername}
               autoCapitalize="none"
               autoCorrect={false}
-              textContentType="username"
+              textContentType="none"
+              autoComplete="off"
+              spellCheck={false}
               editable={!loading}
             />
 
