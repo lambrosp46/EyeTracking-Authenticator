@@ -11,6 +11,7 @@ import LoginScreen from './screens/LoginScreen';
 import RegisterScreen from './screens/RegisterScreen';
 import AuthPointsScreen from './screens/AuthPointsScreen';
 import GazeTestScreen from './screens/GazeTestScreen';
+import ToolsScreen from './screens/ToolsScreen';
 import { installSessionLog } from './utils/sessionLog';
 
 // Every console line also goes to a file on the phone (see utils/sessionLog.js).
@@ -27,7 +28,16 @@ export default function App() {
     >
       <NavigationContainer>
         <Stack.Navigator>
-          <Stack.Screen name="Home" component={HomeScreen} />
+          <Stack.Screen
+            name="Home"
+            component={HomeScreen}
+            options={{ headerShown: false, title: 'Αρχική' }}
+          />
+          <Stack.Screen
+            name="Tools"
+            component={ToolsScreen}
+            options={{ title: 'Εργαλεία' }}
+          />
           <Stack.Screen name="Register" component={RegisterScreen} />
           <Stack.Screen name="Login" component={LoginScreen} />
           <Stack.Screen
