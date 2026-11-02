@@ -197,6 +197,19 @@
       "minCorrectionCm": 0.4,
       "maxCorrectionCm": 3.0,
       "maxRounds": 2,
+      "onFail": {
+        "extraRounds": 1,
+        "recalibrate": true
+      },
+      "stability": {
+        "enabled": true,
+        "distanceCm": 1.5,
+        "eyeXCm": 0.8,
+        "eyeYCm": 0.8,
+        "yawDeg": 3,
+        "pitchDeg": 2,
+        "rollDeg": 4
+      },
       "recheckAfterPoseLock": {
         "enabled": true,
         "points": [[0.5, 0.1], [0.5, 0.5], [0.5, 0.9]],

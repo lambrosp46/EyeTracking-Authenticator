@@ -240,6 +240,28 @@ export default function RegisterScreen({ navigation }) {
     setTimeout(() => setPointsModalVisible(true), MODAL_SWAP_MS);
   };
 
+  // The drift check could not be measured even with the extra rounds: the
+  // fresh calibration no longer fits the user's pose. Calibrate again (the
+  // tapped points stay) instead of confirming the points on a wrong mapping.
+  const handleDriftFailed = () => {
+    Alert.alert(
+      'Χρειάζεται νέα βαθμονόμηση',
+      'Το βλέμμα δεν μετρήθηκε σταθερά. Κράτα το κινητό όπως το κρατάς συνήθως, σταθερό, και κάνε ξανά τη βαθμονόμηση.',
+      [
+        { text: 'Ακύρωση', style: 'cancel', onPress: abortToSelection },
+        {
+          text: 'Νέα βαθμονόμηση',
+          onPress: () => {
+            console.log('[Register] drift check failed - new calibration');
+            calibrationDoneRef.current = false;
+            setPointsModalVisible(false);
+            setTimeout(() => setPointsStage('calibrate'), MODAL_SWAP_MS);
+          },
+        },
+      ]
+    );
+  };
+
   // Cancel button in the modal header — closes without saving.
   // Any previously confirmed points (if the user was re-selecting) are left untouched.
   const handleCancelPoints = () => {
@@ -384,6 +406,7 @@ export default function RegisterScreen({ navigation }) {
                   expectedPoints={pendingPoints}
                   onComplete={handleGazeConfirmed}
                   onCancel={handleCancelPoints}
+                  onDriftFailed={handleDriftFailed}
                 />
               )}
             </View>

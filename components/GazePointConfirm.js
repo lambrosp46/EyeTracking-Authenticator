@@ -65,6 +65,11 @@ export default function GazePointConfirm({
   // Called with true/false while drift-check dots are on screen (login pauses
   // its attempt timer meanwhile).
   onDriftBusyChange,
+  // Called when the drift check cannot be measured even after the extra
+  // rounds (the user kept moving, or the calibration no longer fits). The
+  // screen should offer a new calibration. Without it the screen goes on
+  // without a correction, as before.
+  onDriftFailed,
   // REGISTRATION ONLY: the points the user just tapped (normalized, in order).
   // With them the screen knows which point is expected next, so it can
   //  - ignore a fixation that is not on that point (cfg.ignoreOffTarget), and
@@ -207,6 +212,37 @@ export default function GazePointConfirm({
     };
   }, []);
 
+  // Shown instead of the usual drift-check line after a round failed: the dots
+  // disagreed or the phone moved while they were measured.
+  const STEADY_HINT = 'Κράτα το κινητό σταθερό και κοίτα το κέντρο κάθε κουκκίδας';
+  const [driftHint, setDriftHint] = useState(null);
+  const onDriftFailedRef = useRef(onDriftFailed);
+  onDriftFailedRef.current = onDriftFailed;
+  // Rounds per check: the configured ones plus onFail.extraRounds, shown with
+  // the hint. A login (friend's test, 31/10) that went on WITHOUT a correction
+  // after two failed rounds placed every point 1.5-3.6 cm off; the user reset
+  // the first point 6 times until a later re-check happened to succeed.
+  const onFailCfg = driftCfg.onFail ?? {};
+  const roundsWithRetry = (rounds) => rounds + (onFailCfg.extraRounds ?? 1);
+  // How far the pose may move WHILE the dots are measured (same units as
+  // recheckOnPoseChange). The friend's phone moved 6 cm between two rounds.
+  const stability = {
+    distanceCm: driftCfg.stability?.distanceCm ?? 1.5,
+    eyeXFromCenterCm: driftCfg.stability?.eyeXCm ?? 0.8,
+    eyeYFromTopCm: driftCfg.stability?.eyeYCm ?? 0.8,
+    yawDeg: driftCfg.stability?.yawDeg ?? 3,
+    pitchDeg: driftCfg.stability?.pitchDeg ?? 2,
+    rollDeg: driftCfg.stability?.rollDeg ?? 4,
+  };
+  const movedSince = (ref) => {
+    const m = trackerRef.current.getPoseMetrics?.();
+    if (!ref || !m) return null;
+    const over = Object.entries(stability).filter(
+      ([k, lim]) => m[k] != null && ref[k] != null && Math.abs(m[k] - ref[k]) > lim
+    );
+    return over.length ? over.map(([k]) => `${k} ${(m[k] - ref[k] >= 0 ? '+' : '')}${(m[k] - ref[k]).toFixed(1)}`).join(', ') : null;
+  };
+
   /**
    * One drift check: shows the dots, measures the UNCORRECTED landing offsets,
    * fits the correction (utils/driftFit.js).
@@ -221,6 +257,8 @@ export default function GazePointConfirm({
 
     for (let round = 1; round <= rounds; round++) {
       const offsets = [];
+      const poseAtStart = trackerRef.current.getPoseMetrics?.() ? { ...trackerRef.current.getPoseMetrics() } : null;
+      let moved = null;
       for (let i = 0; i < points.length; i++) {
         const [nx, ny] = points[i];
         setDriftDot({ nx, ny, n: i + 1, total: points.length, collecting: false });
@@ -242,6 +280,10 @@ export default function GazePointConfirm({
           streamEvent('driftAborted', { label, round });
           return { status: 'aborted' };
         }
+        // The phone / head moved while the dots were measured: the offsets
+        // mix two poses and cannot be fitted. Start the round over.
+        moved = driftCfg.stability?.enabled === false ? null : movedSince(poseAtStart);
+        if (moved) break;
         const rect = imageRectRef.current;
         if (!rect || samples.length < (driftCfg.minSamples ?? 8)) {
           offsets.push(null);
@@ -252,6 +294,12 @@ export default function GazePointConfirm({
         offsets.push({ tx, ty, ox: median(samples.map((p) => p.x)) - tx, oy: median(samples.map((p) => p.y)) - ty });
       }
 
+      if (moved) {
+        console.log(`[${label}] round ${round}: pose changed during the dots (${moved}) - measuring again`);
+        streamEvent('driftMoved', { label, round, moved });
+        setDriftHint(STEADY_HINT);
+        continue;
+      }
       const fmt = (o) => (o ? `(${pointsToCm(o.ox).toFixed(2)}, ${pointsToCm(o.oy).toFixed(2)})` : '(no samples)');
       const rect = imageRectRef.current;
       if (!rect) return { status: 'failed' };
@@ -278,6 +326,7 @@ export default function GazePointConfirm({
         return { status: 'applied', correction: fit.correction };
       }
       if (round === rounds) console.log(`[${label}] dots not consistent (${fit.reason})`);
+      else setDriftHint(STEADY_HINT);
     }
     return { status: 'failed' };
   };
@@ -303,12 +352,23 @@ export default function GazePointConfirm({
           points: driftCfg.points ?? [[0.5, 0.1], [0.5, 0.5], [0.12, 0.9], [0.88, 0.9]],
           firstWarmupMs: driftCfg.firstWarmupMs ?? 1200,
           warmupMs: driftCfg.warmupMs ?? 700,
-          rounds: driftCfg.maxRounds ?? 2,
+          rounds: roundsWithRetry(driftCfg.maxRounds ?? 2),
           label: 'DriftCheck',
         });
       } while (res.status === 'aborted' && aliveRef.current);
       if (!aliveRef.current) return;
+      setDriftHint(null);
 
+      if (res.status === 'failed' && onDriftFailedRef.current && onFailCfg.recalibrate !== false) {
+        // Going on without a correction would place the points wherever the
+        // stale mapping puts them: ask the screen for a new calibration.
+        // Stays "busy" (no captures) until the screen replaces this view.
+        console.log('[DriftCheck] could not be measured - asking for a new calibration');
+        streamEvent('driftFailed', { label: 'DriftCheck' });
+        setDriftDot(null);
+        onDriftFailedRef.current();
+        return;
+      }
       if (res.status === 'applied') {
         setCorrection(res.correction);
         console.log('[DriftCheck] correction applied');
@@ -361,10 +421,11 @@ export default function GazePointConfirm({
         points: recheckCfg.points ?? [[0.5, 0.1], [0.5, 0.5], [0.5, 0.9]],
         firstWarmupMs: recheckCfg.firstWarmupMs ?? 900,
         warmupMs: recheckCfg.warmupMs ?? 600,
-        rounds: recheckCfg.maxRounds ?? 2,
+        rounds: roundsWithRetry(recheckCfg.maxRounds ?? 2),
         label: 'DriftRecheck',
       });
       if (!aliveRef.current) return;
+      setDriftHint(null);
 
       if (res.status === 'applied') {
         setCorrection(res.correction);
@@ -658,7 +719,9 @@ export default function GazePointConfirm({
       </Text>
       <Text style={styles.subtitle}>
         {driftPhase !== 'done'
-          ? `Γρήγορος έλεγχος: κοίτα την κίτρινη κουκκίδα${driftDot ? ` (${driftDot.n}/${driftDot.total})` : ''}`
+          ? driftHint
+            ? `${driftHint}${driftDot ? ` (${driftDot.n}/${driftDot.total})` : ''}`
+            : `Γρήγορος έλεγχος: κοίτα την κίτρινη κουκκίδα${driftDot ? ` (${driftDot.n}/${driftDot.total})` : ''}`
           : offTargetHint
           ? `Αυτό δεν είναι το σημείο ${captured.length + 1} — κοίτα το σωστό σημείο`
           : subtitle ??

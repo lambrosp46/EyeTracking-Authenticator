@@ -287,6 +287,28 @@ export default function AuthPointsScreen({ route, navigation }) {
   const handleDriftBusy = useCallback((busy) => {
     driftBusyRef.current = busy;
   }, []);
+
+  // The drift check could not be measured even with the extra rounds: the
+  // mapping no longer fits this pose. A new calibration, not a failed attempt.
+  const handleDriftFailed = useCallback(() => {
+    Alert.alert(
+      'Χρειάζεται νέα βαθμονόμηση',
+      'Το βλέμμα δεν μετρήθηκε σταθερά. Κράτα το κινητό όπως το κρατάς συνήθως, σταθερό, και κάνε ξανά τη βαθμονόμηση.',
+      [
+        { text: 'Ακύρωση', style: 'cancel', onPress: () => leave(false) },
+        {
+          text: 'Νέα βαθμονόμηση',
+          onPress: () => {
+            if (finishingRef.current) return;
+            console.log('[GazeLogin] drift check failed - new calibration');
+            calibrationDoneRef.current = false;
+            setStatusText('Βαθμονόμηση…');
+            setStage('calibrate');
+          },
+        },
+      ]
+    );
+  }, [leave]);
   useEffect(() => {
     if (stage !== 'gaze' || !cfg.attemptTimeoutMs) return undefined;
     let elapsed = 0;
@@ -336,6 +358,7 @@ export default function AuthPointsScreen({ route, navigation }) {
             onComplete={handleAttempt}
             onCancel={() => leave(false)}
             onDriftBusyChange={handleDriftBusy}
+            onDriftFailed={handleDriftFailed}
           />
         ) : (
           <View style={styles.loadingContainer}>
